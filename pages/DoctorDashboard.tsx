@@ -3,7 +3,7 @@ import { Department, Patient, PatientStatus } from '../types';
 import { DEPARTMENTS } from '../constants';
 import { queueService } from '../services/queueService';
 import { PatientCard } from '../components/PatientCard';
-import { LogOut, CheckCircle, RefreshCw, XOctagon, FlaskConical, Stethoscope, UserCheck } from 'lucide-react';
+import { LogOut, CheckCircle, RefreshCw, XOctagon, Stethoscope, UserCheck } from 'lucide-react';
 
 interface DoctorDashboardProps {
   departmentId: Department;
@@ -22,46 +22,42 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ departmentId, 
   const dept = DEPARTMENTS[departmentId];
 
   useEffect(() => {
-    const update = () => {
+    const update = async () => {
+      await queueService.refreshDepartment(departmentId);
       const q = queueService.getQueue(departmentId);
       setQueue(q);
-      
-      // Multi-Doctor Logic:
-      // Only show the active patient if they are assigned to THIS doctor.
+
       if (isSessionStarted && doctorName) {
-        const active = q.find(p => 
-          (p.status === PatientStatus.CALLED || p.status === PatientStatus.IN_CONSULTATION) &&
-          p.assignedDoctor === doctorName
+        const active = q.find(
+          (patient) =>
+            (patient.status === PatientStatus.CALLED || patient.status === PatientStatus.IN_CONSULTATION) &&
+            patient.assignedDoctor === doctorName,
         );
         setCurrentPatient(active || null);
       }
     };
 
-    update();
-    const unsub = queueService.subscribe(update);
+    void update();
+    const unsub = queueService.subscribe(() => {
+      void update();
+    }, departmentId);
     return () => unsub();
   }, [departmentId, isSessionStarted, doctorName]);
 
-  const handleCall = (id: string) => {
+  const handleCall = async (id: string) => {
     if (currentPatient) return; // Prevent calling if already busy
-    queueService.updateStatus(id, PatientStatus.CALLED, undefined, doctorName);
+    await queueService.updateStatus(id, PatientStatus.CALLED, undefined, doctorName);
   };
 
-  const handleComplete = (id: string) => {
-    queueService.updateStatus(id, PatientStatus.COMPLETED, notes);
+  const handleComplete = async (id: string) => {
+    await queueService.updateStatus(id, PatientStatus.COMPLETED, notes, doctorName);
     setNotes('');
     setCurrentPatient(null);
   };
 
-  const handleRefer = (id: string) => {
-    queueService.updateStatus(id, PatientStatus.REFERRED, notes);
-    setNotes('');
-    setCurrentPatient(null);
-  };
-
-  const handleNoShow = (id: string) => {
+  const handleNoShow = async (id: string) => {
     if (confirm('Mark this patient as No Show?')) {
-      queueService.updateStatus(id, PatientStatus.NO_SHOW);
+      await queueService.updateStatus(id, PatientStatus.NO_SHOW, undefined, doctorName);
       setNotes('');
       setCurrentPatient(null);
     }
@@ -83,8 +79,8 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ departmentId, 
   // --- View: Doctor Login ---
   if (!isSessionStarted) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-        <div className="max-w-md w-full bg-white rounded-xl shadow-xl overflow-hidden animate-fade-in-up">
+      <div className="min-h-screen bg-gradient-to-br from-slate-100 via-white to-slate-200 flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-white rounded-2xl shadow-2xl overflow-hidden animate-fade-in-up border border-slate-200">
            <div className={`p-6 ${dept.color} text-white text-center`}>
              <Stethoscope size={48} className="mx-auto mb-4 opacity-80" />
              <h2 className="text-2xl font-bold">Doctor Login</h2>
@@ -122,13 +118,13 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ departmentId, 
   const waitingList = queue.filter(p => p.status === PatientStatus.WAITING);
 
   // Processed count (for stats)
-  const patientsProcessedCount = queue.filter(p => p.status === PatientStatus.COMPLETED || p.status === PatientStatus.REFERRED).length;
+  const patientsProcessedCount = queue.filter(p => p.status === PatientStatus.COMPLETED).length;
 
   // --- View: Dashboard ---
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col md:flex-row">
       {/* Sidebar / Info Panel */}
-      <div className="w-full md:w-80 bg-white border-r border-gray-200 flex flex-col h-screen sticky top-0">
+      <div className="w-full md:w-80 bg-white border-r border-slate-200 flex flex-col h-screen sticky top-0">
         <div className={`p-6 ${dept.color} text-white`}>
           <div className="flex items-center gap-3 mb-2">
             <div className="bg-white/20 p-2 rounded-full"><UserCheck size={20} /></div>
@@ -166,7 +162,7 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ departmentId, 
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 p-6 md:p-8 overflow-y-auto">
+      <div className="flex-1 p-6 md:p-8 overflow-y-auto bg-slate-50/60">
         
         {/* Active Patient Area */}
         <div className="mb-8">
@@ -217,12 +213,6 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ departmentId, 
                   className="px-6 py-3 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg font-bold shadow-sm transition-colors flex items-center gap-2"
                 >
                   <XOctagon size={20} /> No Show
-                </button>
-                <button 
-                  onClick={() => handleRefer(currentPatient.id)}
-                  className="flex-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 py-3 rounded-lg font-bold shadow-sm transition-colors flex justify-center items-center gap-2"
-                >
-                  <FlaskConical size={20} /> Refer to Lab
                 </button>
                 <button 
                   onClick={() => handleComplete(currentPatient.id)}

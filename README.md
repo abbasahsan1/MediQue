@@ -1,20 +1,29 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# MediQue
 
-# Run and deploy your AI Studio app
+MediQue is a hospital queue management system. The repository now includes:
 
-This contains everything you need to run your app locally.
+- Frontend prototype (existing Vite app).
+- New production-oriented backend foundation in [server/README.md](server/README.md).
+- Hard-gate architecture and compliance design in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+- Prototype gap remediation plan in [docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md).
 
-View your app in AI Studio: https://ai.studio/apps/drive/1W2FAZrsIJmkjBlZQU_JoZoCzT_JziT6X
+## Frontend (prototype)
 
-## Run Locally
+1. `npm install`
+2. `npm run dev`
 
-**Prerequisites:**  Node.js
+## Backend (production foundation)
 
+1. `cd server`
+2. `cp .env.example .env`
+3. `npm install`
+4. `npm run dev`
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+## Validation
+
+- Backend build: `cd server && npm run build`
+- Backend tests: `cd server && npm test`
+
+## Deployment
+
+- Local container run: `docker compose up --build`

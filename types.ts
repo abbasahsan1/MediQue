@@ -4,7 +4,6 @@ export enum PatientStatus {
   IN_CONSULTATION = 'IN_CONSULTATION',
   COMPLETED = 'COMPLETED',
   NO_SHOW = 'NO_SHOW',
-  REFERRED = 'REFERRED',
 }
 
 export enum Department {
@@ -29,6 +28,7 @@ export interface Patient {
   completedTime?: number;
   notes?: string;
   assignedDoctor?: string;
+  version?: number;
 }
 
 export interface QueueStats {

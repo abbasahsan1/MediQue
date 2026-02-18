@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { Patient, PatientStatus } from '../types';
 import { queueService } from '../services/queueService';
 import { DEPARTMENTS } from '../constants';
-import { Bell, Volume2, AlertOctagon, FlaskConical, Stethoscope } from 'lucide-react';
+import { Bell, Volume2, AlertOctagon, Stethoscope } from 'lucide-react';
 
 interface PatientViewProps {
   patientId: string;
@@ -10,7 +10,7 @@ interface PatientViewProps {
 }
 
 export const PatientView: React.FC<PatientViewProps> = ({ patientId, onExit }) => {
-  const [patient, setPatient] = useState<Patient | undefined>(queueService.getPatient(patientId));
+  const [patient, setPatient] = useState<Patient | undefined>(undefined);
   const [position, setPosition] = useState<number>(0);
   const [currentServing, setCurrentServing] = useState<string>('-');
   const [lastNotifiedPosition, setLastNotifiedPosition] = useState<number>(999);
@@ -28,8 +28,8 @@ export const PatientView: React.FC<PatientViewProps> = ({ patientId, onExit }) =
   }, []);
 
   useEffect(() => {
-    const updateData = () => {
-      const p = queueService.getPatient(patientId);
+    const updateData = async () => {
+      const p = await queueService.fetchPatient(patientId);
       
       // Edge Case: Notifications
       // Check for status change to trigger notification AND Sound
@@ -51,6 +51,7 @@ export const PatientView: React.FC<PatientViewProps> = ({ patientId, onExit }) =
       setPatient(p);
 
       if (p) {
+        await queueService.refreshDepartment(p.department);
         const queue = queueService.getQueue(p.department);
         // Find position: count people with status WAITING who are ahead in the array
         const myIndex = queue.findIndex(x => x.id === p.id);
@@ -83,8 +84,10 @@ export const PatientView: React.FC<PatientViewProps> = ({ patientId, onExit }) =
       }
     };
 
-    updateData();
-    const unsubscribe = queueService.subscribe(updateData);
+    void updateData();
+    const unsubscribe = queueService.subscribe(() => {
+      void updateData();
+    });
     return () => unsubscribe();
   }, [patientId, patient?.status, lastNotifiedPosition]);
 
@@ -95,10 +98,9 @@ export const PatientView: React.FC<PatientViewProps> = ({ patientId, onExit }) =
   const isInConsultation = patient.status === PatientStatus.IN_CONSULTATION;
   const isCompleted = patient.status === PatientStatus.COMPLETED;
   const isNoShow = patient.status === PatientStatus.NO_SHOW;
-  const isReferred = patient.status === PatientStatus.REFERRED;
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col items-center p-6">
+    <div className="min-h-screen bg-gradient-to-b from-slate-100 via-white to-slate-100 flex flex-col items-center p-6">
       <div className="w-full max-w-md space-y-6">
         
         {/* Header */}
@@ -108,11 +110,10 @@ export const PatientView: React.FC<PatientViewProps> = ({ patientId, onExit }) =
         </div>
 
         {/* Token Card */}
-        <div className={`bg-white rounded-2xl shadow-xl overflow-hidden border-t-8 ${
+        <div className={`bg-white rounded-2xl shadow-xl overflow-hidden border border-slate-200 border-t-8 ${
           isCalled ? 'border-green-500' : 
           isInConsultation ? 'border-green-600' :
           isNoShow ? 'border-red-500' :
-          isReferred ? 'border-indigo-500' :
           dept.color
         }`}>
           <div className="p-8 text-center relative">
@@ -125,7 +126,6 @@ export const PatientView: React.FC<PatientViewProps> = ({ patientId, onExit }) =
               isInConsultation ? 'bg-green-100 text-green-800' :
               isCompleted ? 'bg-gray-100 text-gray-600' :
               isNoShow ? 'bg-red-100 text-red-600' :
-              isReferred ? 'bg-indigo-100 text-indigo-700' :
               'bg-blue-50 text-blue-700'
             }`}>
               {patient.status.replace('_', ' ')}
@@ -133,7 +133,7 @@ export const PatientView: React.FC<PatientViewProps> = ({ patientId, onExit }) =
           </div>
           
           {/* Status Footer */}
-          {!isCompleted && !isCalled && !isInConsultation && !isNoShow && !isReferred && (
+          {!isCompleted && !isCalled && !isInConsultation && !isNoShow && (
             <div className="bg-gray-50 px-6 py-4 border-t border-gray-100 flex justify-between items-center">
                <div className="text-center">
                  <p className="text-xs text-gray-400 uppercase">Ahead of you</p>
@@ -194,26 +194,6 @@ export const PatientView: React.FC<PatientViewProps> = ({ patientId, onExit }) =
           </div>
         )}
 
-        {isReferred && (
-          <div className="bg-indigo-50 border border-indigo-200 p-6 rounded-xl shadow-sm text-center">
-            <FlaskConical className="mx-auto mb-2 text-indigo-500" size={32} />
-            <h2 className="text-xl font-bold text-indigo-800 mb-1">Referred to Lab</h2>
-            <p className="text-indigo-600 text-sm mb-4">Please proceed to the laboratory for further tests.</p>
-            {patient.notes && (
-              <div className="bg-white p-3 rounded-lg border border-indigo-100 text-sm text-indigo-900 text-left">
-                <strong>Instructions:</strong><br/>
-                {patient.notes}
-              </div>
-            )}
-            <button 
-              onClick={onExit}
-              className="mt-6 w-full py-3 bg-gray-900 text-white rounded-lg font-medium"
-            >
-              Close
-            </button>
-          </div>
-        )}
-
         {isCompleted && (
           <div className="bg-white p-6 rounded-xl shadow border border-gray-200">
             <h3 className="text-lg font-bold text-gray-800 mb-2">Visit Summary</h3>
@@ -234,7 +214,7 @@ export const PatientView: React.FC<PatientViewProps> = ({ patientId, onExit }) =
         )}
 
         {/* Info */}
-        {!isCompleted && !isNoShow && !isReferred && (
+        {!isCompleted && !isNoShow && (
             <div className="text-center text-xs text-gray-400 mt-8">
                 <p>Do not close this window.</p>
                 <p>Your spot is saved automatically.</p>

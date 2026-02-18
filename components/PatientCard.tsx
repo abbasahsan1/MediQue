@@ -16,25 +16,25 @@ export const PatientCard: React.FC<PatientCardProps> = ({ patient, onCall, onCom
 
   return (
     <div 
-      className={`relative p-4 rounded-lg border-l-4 shadow-sm transition-all duration-300 hover:shadow-md ${
+      className={`relative p-4 rounded-xl border-l-4 shadow-sm transition-all duration-300 hover:shadow-md border ${
         isActive 
-          ? 'bg-blue-50 border-blue-500 ring-1 ring-blue-200' 
+          ? 'bg-blue-50 border-blue-200 border-l-blue-500 ring-1 ring-blue-200' 
           : patient.isUrgent 
-            ? 'bg-red-50 border-red-500' 
-            : 'bg-white border-gray-300'
+            ? 'bg-red-50 border-red-200 border-l-red-500' 
+            : 'bg-white border-slate-200 border-l-slate-300'
       } ${actionsDisabled && !isActive ? 'opacity-60 grayscale' : ''}`}
     >
       <div className="flex justify-between items-start">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <span className="text-xl font-bold text-gray-900">{patient.tokenNumber}</span>
+            <span className="text-2xl font-black tracking-tight text-slate-900">{patient.tokenNumber}</span>
             {patient.isUrgent && (
               <span className="flex items-center gap-1 text-xs font-bold text-red-600 bg-red-100 px-2 py-0.5 rounded-full">
                 <AlertTriangle size={10} /> URGENT
               </span>
             )}
           </div>
-          <div className="text-sm text-gray-600 flex items-center gap-1 mb-2">
+          <div className="text-sm text-slate-600 flex items-center gap-1 mb-2">
              <User size={12} /> {patient.name} ({patient.age}y)
           </div>
           <div className="flex flex-wrap gap-1">

@@ -9,7 +9,8 @@ export const TVDisplay: React.FC<{ onExit: () => void }> = ({ onExit }) => {
   const [upcomingPatients, setUpcomingPatients] = useState<Record<string, Patient[]>>({});
 
   useEffect(() => {
-    const update = () => {
+    const update = async () => {
+      await queueService.refreshAllDepartments();
       const all = queueService.getQueue();
       
       // 1. Get Active (Called/In Consultation)
@@ -29,9 +30,13 @@ export const TVDisplay: React.FC<{ onExit: () => void }> = ({ onExit }) => {
       setUpcomingPatients(next);
     };
 
-    update();
-    const interval = setInterval(update, 5000); 
-    const unsub = queueService.subscribe(update);
+    void update();
+    const interval = setInterval(() => {
+      void update();
+    }, 5000);
+    const unsub = queueService.subscribe(() => {
+      void update();
+    });
     
     return () => {
       clearInterval(interval);

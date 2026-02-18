@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { Department } from '../types';
-import { COMMON_SYMPTOMS, DEPARTMENTS } from '../constants';
+import { DEPARTMENTS } from '../constants';
 import { queueService } from '../services/queueService';
-import { Activity, User, AlertCircle, MapPin, Loader } from 'lucide-react';
+import { Activity, User, AlertCircle, MapPin, Loader, Stethoscope } from 'lucide-react';
 
 interface PatientFormProps {
   departmentId: Department;
@@ -12,21 +12,13 @@ interface PatientFormProps {
 export const PatientForm: React.FC<PatientFormProps> = ({ departmentId, onSuccess }) => {
   const [name, setName] = useState('');
   const [age, setAge] = useState<string>('');
-  const [selectedSymptoms, setSelectedSymptoms] = useState<string[]>([]);
+  const [symptomsInput, setSymptomsInput] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [locationVerified, setLocationVerified] = useState(false);
   const [checkingLocation, setCheckingLocation] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
 
   const dept = DEPARTMENTS[departmentId];
-
-  const toggleSymptom = (symptom: string) => {
-    if (selectedSymptoms.includes(symptom)) {
-      setSelectedSymptoms(selectedSymptoms.filter((s) => s !== symptom));
-    } else {
-      setSelectedSymptoms([...selectedSymptoms, symptom]);
-    }
-  };
 
   const verifyLocation = () => {
     setCheckingLocation(true);
@@ -71,30 +63,40 @@ export const PatientForm: React.FC<PatientFormProps> = ({ departmentId, onSucces
     );
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name || !age) return;
     if (!locationVerified) return;
 
     setIsSubmitting(true);
-    // Simulate network delay
-    setTimeout(() => {
-      const patient = queueService.addPatient(name, parseInt(age), departmentId, selectedSymptoms);
+    try {
+      const symptoms = symptomsInput
+        .split(/[,\n]/)
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .slice(0, 15);
+      const patient = await queueService.checkIn(name, parseInt(age, 10), departmentId, symptoms);
       setIsSubmitting(false);
       onSuccess(patient.id);
-    }, 800);
+    } catch {
+      setIsSubmitting(false);
+      alert('Check-in failed. Please try again.');
+    }
   };
 
   return (
-    <div className="max-w-md mx-auto bg-white p-6 rounded-xl shadow-lg border border-gray-100 animate-fade-in-up">
-      <div className={`h-2 w-full ${dept.color} rounded-t-xl mb-6`}></div>
-      
-      <div className="text-center mb-8">
-        <h2 className="text-2xl font-bold text-gray-800">Check In</h2>
-        <p className="text-gray-500">Welcome to {dept.name}</p>
+    <div className="max-w-lg mx-auto bg-white/95 backdrop-blur p-7 rounded-2xl shadow-2xl border border-slate-200 animate-fade-in-up">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Digital Check-In</p>
+          <h2 className="text-2xl font-bold text-slate-900">Welcome to {dept.name}</h2>
+        </div>
+        <div className={`h-12 w-12 rounded-xl ${dept.color} text-white flex items-center justify-center shadow-lg`}>
+          <Stethoscope size={20} />
+        </div>
       </div>
-
-      <form onSubmit={handleSubmit} className="space-y-6">
+      
+      <form onSubmit={handleSubmit} className="space-y-5">
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
             <User size={16} /> Full Name
@@ -104,7 +106,7 @@ export const PatientForm: React.FC<PatientFormProps> = ({ departmentId, onSucces
             required
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
+            className="w-full px-4 py-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-slate-900/20 focus:border-slate-500 outline-none transition-all"
             placeholder="e.g. John Doe"
           />
         </div>
@@ -120,35 +122,26 @@ export const PatientForm: React.FC<PatientFormProps> = ({ departmentId, onSucces
             max="120"
             value={age}
             onChange={(e) => setAge(e.target.value)}
-            className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
+            className="w-full px-4 py-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-slate-900/20 focus:border-slate-500 outline-none transition-all"
             placeholder="Age"
           />
         </div>
 
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-3 flex items-center gap-2">
-            <AlertCircle size={16} /> Symptoms (Select all that apply)
+            <AlertCircle size={16} /> Symptoms (Describe in your own words)
           </label>
-          <div className="flex flex-wrap gap-2">
-            {COMMON_SYMPTOMS.map((symptom) => (
-              <button
-                key={symptom}
-                type="button"
-                onClick={() => toggleSymptom(symptom)}
-                className={`px-3 py-2 rounded-full text-sm font-medium transition-colors ${
-                  selectedSymptoms.includes(symptom)
-                    ? 'bg-blue-600 text-white shadow-md'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                }`}
-              >
-                {symptom}
-              </button>
-            ))}
-          </div>
+          <textarea
+            value={symptomsInput}
+            onChange={(event) => setSymptomsInput(event.target.value)}
+            className="w-full min-h-28 px-4 py-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-slate-900/20 focus:border-slate-500 outline-none transition-all resize-y"
+            placeholder="Example: headache, mild fever, sore throat"
+          />
+          <p className="text-xs text-slate-500 mt-2">Use commas or new lines to separate symptoms.</p>
         </div>
 
         {/* Edge Case: Location Verification Box */}
-        <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+        <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
            <div className="flex justify-between items-center mb-2">
              <label className="block text-sm font-medium text-gray-700 flex items-center gap-2">
                <MapPin size={16} /> Location Verification
@@ -195,10 +188,10 @@ export const PatientForm: React.FC<PatientFormProps> = ({ departmentId, onSucces
         <button
           type="submit"
           disabled={isSubmitting || !locationVerified}
-          className={`w-full py-4 rounded-lg font-bold text-white shadow-lg transform transition hover:-translate-y-1 ${
+          className={`w-full py-4 rounded-xl font-bold text-white shadow-lg transform transition hover:-translate-y-0.5 ${
             isSubmitting || !locationVerified 
               ? 'bg-gray-400 cursor-not-allowed transform-none' 
-              : 'bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800'
+              : 'bg-slate-900 hover:bg-black'
           }`}
         >
           {isSubmitting ? 'Generating Token...' : 'Get Token'}

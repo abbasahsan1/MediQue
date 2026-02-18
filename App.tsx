@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Department, PatientStatus } from './types';
+import { Department, DepartmentConfig, PatientStatus } from './types';
 import { DEPARTMENTS } from './constants';
 import { queueService } from './services/queueService';
 
@@ -29,22 +29,44 @@ function App() {
   const [currentView, setCurrentView] = useState<View>(View.LANDING);
   const [selectedDept, setSelectedDept] = useState<Department>(Department.GENERAL);
   const [patientId, setPatientId] = useState<string>('');
+  const [availableDepartments, setAvailableDepartments] = useState<DepartmentConfig[]>(Object.values(DEPARTMENTS));
 
   // Edge Case: Session Persistence
   // Check for existing patient session on mount (Browser Reload / Re-open)
   useEffect(() => {
-    const storedId = localStorage.getItem('mediqueue_patient_id');
-    if (storedId) {
-      const p = queueService.getPatient(storedId);
-      // Only restore if patient exists and isn't finished/no-show
-      if (p && p.status !== PatientStatus.COMPLETED && p.status !== PatientStatus.NO_SHOW) {
-        setPatientId(storedId);
-        setCurrentView(View.PATIENT_STATUS);
-      } else {
-        // Cleanup invalid or expired session (Edge Case: Stale local storage)
+    const restore = async () => {
+      const storedId = localStorage.getItem('mediqueue_patient_id');
+      if (!storedId) return;
+      try {
+        const patient = await queueService.fetchPatient(storedId);
+        if (patient && patient.status !== PatientStatus.COMPLETED && patient.status !== PatientStatus.NO_SHOW) {
+          setPatientId(storedId);
+          setCurrentView(View.PATIENT_STATUS);
+        } else {
+          localStorage.removeItem('mediqueue_patient_id');
+        }
+      } catch {
         localStorage.removeItem('mediqueue_patient_id');
       }
-    }
+    };
+
+    void restore();
+  }, []);
+
+  useEffect(() => {
+    const loadDepartments = async () => {
+      try {
+        const departments = await queueService.getDepartments();
+        if (departments.length > 0) {
+          setAvailableDepartments(departments);
+          setSelectedDept(departments[0].id as Department);
+        }
+      } catch {
+        setAvailableDepartments(Object.values(DEPARTMENTS));
+      }
+    };
+
+    void loadDepartments();
   }, []);
 
   // Routing Handlers
@@ -108,28 +130,29 @@ function App() {
 
   // --- Landing Page (Role Selection) ---
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center p-6">
-      <div className="max-w-6xl w-full">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#e2e8f0,_#f8fafc_40%,_#ffffff_80%)] flex items-center justify-center p-6">
+      <div className="max-w-7xl w-full">
         <div className="text-center mb-12">
-          <h1 className="text-4xl font-extrabold text-gray-900 mb-4 tracking-tight">MediQueue System</h1>
-          <p className="text-xl text-gray-600">Select your role to simulate the experience.</p>
+          <p className="text-sm uppercase tracking-[0.35em] text-slate-500 mb-3">Hospital Queue Platform</p>
+          <h1 className="text-5xl font-black text-slate-900 mb-4 tracking-tight">MediQue Control Console</h1>
+          <p className="text-lg text-slate-600">Choose a workspace to continue your shift.</p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
           
           {/* 1. Patient Flow (QR Simulation) */}
-          <div className="bg-white p-6 rounded-2xl shadow-xl shadow-blue-500/10 border border-blue-100 hover:scale-105 transition-transform duration-300">
-             <div className="h-12 w-12 bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center mb-4">
+          <div className="bg-white/95 backdrop-blur p-6 rounded-2xl shadow-xl border border-slate-200 hover:scale-[1.02] transition-transform duration-300">
+             <div className="h-12 w-12 bg-blue-100 text-blue-700 rounded-xl flex items-center justify-center mb-4">
                <Smartphone size={24} />
              </div>
-             <h3 className="text-lg font-bold text-gray-900 mb-2">Patient (Scan QR)</h3>
-             <p className="text-sm text-gray-500 mb-4">Simulate a patient scanning a QR code at a specific department.</p>
+             <h3 className="text-lg font-bold text-slate-900 mb-2">Patient Check-In</h3>
+             <p className="text-sm text-slate-500 mb-4">Open a department QR flow on a patient device.</p>
              <div className="space-y-2">
-               {Object.values(DEPARTMENTS).slice(0, 3).map(dept => (
+               {availableDepartments.slice(0, 4).map(dept => (
                  <button 
                    key={dept.id}
-                   onClick={() => handleScanQR(dept.id)}
-                   className="w-full text-left px-3 py-2 text-sm font-medium text-gray-700 bg-gray-50 hover:bg-blue-50 hover:text-blue-700 rounded-md transition-colors"
+                   onClick={() => handleScanQR(dept.id as Department)}
+                   className="w-full text-left px-3 py-2 text-sm font-medium text-slate-700 bg-slate-50 hover:bg-blue-50 hover:text-blue-700 rounded-lg transition-colors"
                  >
                    → {dept.name}
                  </button>
@@ -138,18 +161,18 @@ function App() {
           </div>
 
           {/* 2. Doctor Flow */}
-          <div className="bg-white p-6 rounded-2xl shadow-xl shadow-indigo-500/10 border border-indigo-100 hover:scale-105 transition-transform duration-300">
-             <div className="h-12 w-12 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center mb-4">
+          <div className="bg-white/95 backdrop-blur p-6 rounded-2xl shadow-xl border border-slate-200 hover:scale-[1.02] transition-transform duration-300">
+             <div className="h-12 w-12 bg-indigo-100 text-indigo-700 rounded-xl flex items-center justify-center mb-4">
                <Stethoscope size={24} />
              </div>
              <h3 className="text-lg font-bold text-gray-900 mb-2">Doctor Portal</h3>
-             <p className="text-sm text-gray-500 mb-4">Manage queues, call patients, and write prescriptions.</p>
+             <p className="text-sm text-slate-500 mb-4">Call patients, consult, and complete visits quickly.</p>
              <div className="space-y-2">
-               {Object.values(DEPARTMENTS).slice(0, 3).map(dept => (
+               {availableDepartments.slice(0, 4).map(dept => (
                  <button 
                    key={dept.id}
-                   onClick={() => handleDoctorLogin(dept.id)}
-                   className="w-full text-left px-3 py-2 text-sm font-medium text-gray-700 bg-gray-50 hover:bg-indigo-50 hover:text-indigo-700 rounded-md transition-colors"
+                   onClick={() => handleDoctorLogin(dept.id as Department)}
+                   className="w-full text-left px-3 py-2 text-sm font-medium text-slate-700 bg-slate-50 hover:bg-indigo-50 hover:text-indigo-700 rounded-lg transition-colors"
                  >
                    Login to {dept.code}
                  </button>
@@ -160,31 +183,31 @@ function App() {
           {/* 3. Admin Flow */}
           <div 
             onClick={() => setCurrentView(View.ADMIN_DASHBOARD)}
-            className="bg-white p-6 rounded-2xl shadow-xl shadow-purple-500/10 border border-purple-100 hover:scale-105 transition-transform duration-300 cursor-pointer group"
+            className="bg-white/95 backdrop-blur p-6 rounded-2xl shadow-xl border border-slate-200 hover:scale-[1.02] transition-transform duration-300 cursor-pointer group"
           >
-             <div className="h-12 w-12 bg-purple-100 text-purple-600 rounded-lg flex items-center justify-center mb-4 group-hover:bg-purple-600 group-hover:text-white transition-colors">
+             <div className="h-12 w-12 bg-purple-100 text-purple-700 rounded-xl flex items-center justify-center mb-4 group-hover:bg-purple-600 group-hover:text-white transition-colors">
                <LayoutGrid size={24} />
              </div>
              <h3 className="text-lg font-bold text-gray-900 mb-2">Admin Dashboard</h3>
-             <p className="text-sm text-gray-500">View live analytics, wait times, generate QR codes, and AI insights.</p>
+             <p className="text-sm text-slate-500">Manage departments, QR flows, analytics, and audit oversight.</p>
           </div>
 
           {/* 4. Reception Flow */}
           <div 
             onClick={() => setCurrentView(View.RECEPTION)}
-            className="bg-white p-6 rounded-2xl shadow-xl shadow-teal-500/10 border border-teal-100 hover:scale-105 transition-transform duration-300 cursor-pointer group"
+            className="bg-white/95 backdrop-blur p-6 rounded-2xl shadow-xl border border-slate-200 hover:scale-[1.02] transition-transform duration-300 cursor-pointer group"
           >
-             <div className="h-12 w-12 bg-teal-100 text-teal-600 rounded-lg flex items-center justify-center mb-4 group-hover:bg-teal-600 group-hover:text-white transition-colors">
+             <div className="h-12 w-12 bg-teal-100 text-teal-700 rounded-xl flex items-center justify-center mb-4 group-hover:bg-teal-600 group-hover:text-white transition-colors">
                <ClipboardList size={24} />
              </div>
              <h3 className="text-lg font-bold text-gray-900 mb-2">Reception Desk</h3>
-             <p className="text-sm text-gray-500">Manual entry for patients without smartphones or special assistance.</p>
+             <p className="text-sm text-slate-500">Manual patient entry for assisted check-ins and support needs.</p>
           </div>
 
           {/* 5. TV Display Flow */}
           <div 
              onClick={() => setCurrentView(View.TV_DISPLAY)}
-             className="bg-gray-900 p-6 rounded-2xl shadow-xl shadow-gray-900/20 border border-gray-800 hover:scale-105 transition-transform duration-300 cursor-pointer group"
+             className="bg-slate-950 p-6 rounded-2xl shadow-xl shadow-slate-900/20 border border-slate-800 hover:scale-[1.02] transition-transform duration-300 cursor-pointer group"
           >
              <div className="h-12 w-12 bg-gray-800 text-gray-300 rounded-lg flex items-center justify-center mb-4 group-hover:bg-white group-hover:text-black transition-colors">
                <Monitor size={24} />
@@ -197,8 +220,8 @@ function App() {
 
         <div className="mt-12 text-center">
             <button 
-              onClick={() => { queueService.clearData(); localStorage.removeItem('mediqueue_patient_id'); alert('System reset.'); window.location.reload(); }}
-              className="text-xs text-red-400 hover:text-red-600 underline"
+              onClick={async () => { await queueService.clearData(); alert('System reset.'); window.location.reload(); }}
+              className="text-xs text-slate-400 hover:text-red-600 underline"
             >
               Reset System Data
             </button>

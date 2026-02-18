@@ -1,0 +1,25 @@
+:root {
+  --surface: #ffffff;
+  --surface-muted: #f8fafc;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --border: #e2e8f0;
+  --ring: #94a3b8;
+  --radius: 14px;
+}
+
+* {
+  font-variant-ligatures: none;
+}
+
+body {
+  color: var(--text-primary);
+  background: radial-gradient(circle at top, #e2e8f0, #f8fafc 45%, #ffffff 80%);
+}
+
+.card-surface {
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 10px 30px -12px rgba(15, 23, 42, 0.22);
+}

@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { Department } from '../types';
-import { DEPARTMENTS, COMMON_SYMPTOMS } from '../constants';
+import { DEPARTMENTS } from '../constants';
 import { queueService } from '../services/queueService';
-import { User, Activity, AlertCircle, Printer, ArrowLeft } from 'lucide-react';
+import { User, Activity, AlertCircle, Printer, ArrowLeft, Building2 } from 'lucide-react';
 
 interface ReceptionViewProps {
   onExit: () => void;
@@ -12,41 +12,42 @@ export const ReceptionView: React.FC<ReceptionViewProps> = ({ onExit }) => {
   const [selectedDept, setSelectedDept] = useState<Department>(Department.GENERAL);
   const [name, setName] = useState('');
   const [age, setAge] = useState('');
-  const [selectedSymptoms, setSelectedSymptoms] = useState<string[]>([]);
+  const [symptomsInput, setSymptomsInput] = useState('');
   const [generatedToken, setGeneratedToken] = useState<string | null>(null);
 
-  const toggleSymptom = (symptom: string) => {
-    if (selectedSymptoms.includes(symptom)) {
-      setSelectedSymptoms(selectedSymptoms.filter((s) => s !== symptom));
-    } else {
-      setSelectedSymptoms([...selectedSymptoms, symptom]);
-    }
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name || !age) return;
-    const patient = queueService.addPatient(name, parseInt(age), selectedDept, selectedSymptoms);
-    setGeneratedToken(patient.tokenNumber);
+    const symptoms = symptomsInput
+      .split(/[,\n]/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .slice(0, 15);
+    try {
+      const patient = await queueService.checkIn(name, parseInt(age, 10), selectedDept, symptoms);
+      setGeneratedToken(patient.tokenNumber);
+    } catch {
+      alert('Failed to register patient. Please retry.');
+    }
   };
 
   const handleReset = () => {
     setName('');
     setAge('');
-    setSelectedSymptoms([]);
+    setSymptomsInput('');
     setGeneratedToken(null);
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 p-6 flex items-center justify-center">
-      <div className="max-w-2xl w-full bg-white rounded-xl shadow-2xl overflow-hidden">
+    <div className="min-h-screen bg-gradient-to-br from-slate-100 via-white to-slate-200 p-6 flex items-center justify-center">
+      <div className="max-w-2xl w-full bg-white rounded-2xl shadow-2xl overflow-hidden border border-slate-200">
         {/* Header */}
-        <div className="bg-gray-900 text-white p-6 flex justify-between items-center">
+        <div className="bg-slate-950 text-white p-6 flex justify-between items-center">
           <div>
-            <h1 className="text-2xl font-bold">Reception Desk</h1>
-            <p className="text-gray-400 text-sm">Manual Patient Entry System</p>
+            <h1 className="text-2xl font-bold flex items-center gap-2"><Building2 size={24} /> Reception Desk</h1>
+            <p className="text-slate-300 text-sm">Manual Patient Entry System</p>
           </div>
-          <button onClick={onExit} className="text-gray-400 hover:text-white flex items-center gap-2">
+          <button onClick={onExit} className="text-slate-300 hover:text-white flex items-center gap-2">
             <ArrowLeft size={18} /> Exit
           </button>
         </div>
@@ -57,16 +58,16 @@ export const ReceptionView: React.FC<ReceptionViewProps> = ({ onExit }) => {
               <div className="bg-green-100 text-green-800 h-20 w-20 rounded-full flex items-center justify-center mx-auto mb-6">
                  <Printer size={32} />
               </div>
-              <h2 className="text-3xl font-bold text-gray-800 mb-2">Token Generated</h2>
-              <div className="text-6xl font-black text-blue-600 my-6 tracking-tighter">
+              <h2 className="text-3xl font-bold text-slate-900 mb-2">Token Generated</h2>
+              <div className="text-6xl font-black text-slate-800 my-6 tracking-tighter">
                 {generatedToken}
               </div>
-              <p className="text-gray-500 mb-8">
+              <p className="text-slate-500 mb-8">
                 Please write this number on a slip for the patient.
               </p>
               <button 
                 onClick={handleReset}
-                className="bg-blue-600 text-white px-8 py-3 rounded-lg font-bold hover:bg-blue-700 transition-colors shadow-lg"
+                className="bg-slate-900 text-white px-8 py-3 rounded-xl font-bold hover:bg-black transition-colors shadow-lg"
               >
                 Register Next Patient
               </button>
@@ -83,10 +84,10 @@ export const ReceptionView: React.FC<ReceptionViewProps> = ({ onExit }) => {
                       key={dept.id}
                       type="button"
                       onClick={() => setSelectedDept(dept.id)}
-                      className={`p-3 rounded-lg text-sm font-medium border-2 transition-all text-left ${
+                      className={`p-3 rounded-xl text-sm font-medium border-2 transition-all text-left ${
                         selectedDept === dept.id 
-                          ? `border-blue-500 bg-blue-50 text-blue-700` 
-                          : 'border-gray-200 hover:border-gray-300 text-gray-600'
+                          ? `border-slate-700 bg-slate-100 text-slate-900` 
+                          : 'border-slate-200 hover:border-slate-300 text-slate-600'
                       }`}
                     >
                       {dept.name}
@@ -105,7 +106,7 @@ export const ReceptionView: React.FC<ReceptionViewProps> = ({ onExit }) => {
                     required
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 outline-none"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-slate-900/20 outline-none"
                     placeholder="Full Name"
                   />
                 </div>
@@ -118,7 +119,7 @@ export const ReceptionView: React.FC<ReceptionViewProps> = ({ onExit }) => {
                     required
                     value={age}
                     onChange={(e) => setAge(e.target.value)}
-                    className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 outline-none"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-slate-900/20 outline-none"
                     placeholder="Years"
                   />
                 </div>
@@ -126,30 +127,20 @@ export const ReceptionView: React.FC<ReceptionViewProps> = ({ onExit }) => {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-3 flex items-center gap-2">
-                  <AlertCircle size={16} /> Symptoms
+                  <AlertCircle size={16} /> Symptoms (Free text)
                 </label>
-                <div className="flex flex-wrap gap-2">
-                  {COMMON_SYMPTOMS.map((symptom) => (
-                    <button
-                      key={symptom}
-                      type="button"
-                      onClick={() => toggleSymptom(symptom)}
-                      className={`px-3 py-2 rounded-full text-sm font-medium transition-colors ${
-                        selectedSymptoms.includes(symptom)
-                          ? 'bg-red-100 text-red-700 border border-red-200'
-                          : 'bg-gray-50 text-gray-600 border border-gray-200 hover:bg-gray-100'
-                      }`}
-                    >
-                      {symptom}
-                    </button>
-                  ))}
-                </div>
+                <textarea
+                  value={symptomsInput}
+                  onChange={(event) => setSymptomsInput(event.target.value)}
+                  className="w-full min-h-28 px-4 py-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-slate-900/20 outline-none resize-y"
+                  placeholder="Enter symptoms separated by commas or new lines"
+                />
               </div>
 
               <div className="pt-4">
                 <button
                   type="submit"
-                  className="w-full bg-gray-900 text-white py-4 rounded-xl font-bold shadow-lg hover:bg-black transition-transform transform hover:-translate-y-1"
+                  className="w-full bg-slate-900 text-white py-4 rounded-xl font-bold shadow-lg hover:bg-black transition-transform transform hover:-translate-y-0.5"
                 >
                   Generate Token
                 </button>
