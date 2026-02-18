@@ -1,258 +1,310 @@
 import React, { useEffect, useState } from 'react';
-import { Department, Patient, PatientStatus } from '../types';
-import { DEPARTMENTS } from '../constants';
-import { queueService } from '../services/queueService';
-import { PatientCard } from '../components/PatientCard';
-import { LogOut, CheckCircle, RefreshCw, XOctagon, Stethoscope, UserCheck } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Patient, PatientStatus } from '../types';
+import { DEPARTMENTS, URGENT_KEYWORDS } from '../constants';
+import { queueService, DoctorSession } from '../services/queueService';
+import {
+  LogOut, CheckCircle, Clock, XOctagon,
+  AlertTriangle, Activity, Users, Inbox, FlaskConical,
+} from 'lucide-react';
 
-interface DoctorDashboardProps {
-  departmentId: Department;
-  onLogout: () => void;
+function isProblemSevere(text?: string): boolean {
+  if (!text) return false;
+  const lower = text.toLowerCase();
+  return URGENT_KEYWORDS.some((kw) => lower.includes(kw));
 }
 
-export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ departmentId, onLogout }) => {
+export const DoctorDashboard: React.FC = () => {
+  const navigate = useNavigate();
+  const [session] = useState<DoctorSession | null>(() => queueService.getDoctorSession());
+
   const [queue, setQueue] = useState<Patient[]>([]);
   const [currentPatient, setCurrentPatient] = useState<Patient | null>(null);
   const [notes, setNotes] = useState('');
-  
-  // Doctor Session State - Initialize from sessionStorage if available
-  const [doctorName, setDoctorName] = useState(() => sessionStorage.getItem('mediqueue_doctor_name') || '');
-  const [isSessionStarted, setIsSessionStarted] = useState(() => !!sessionStorage.getItem('mediqueue_doctor_name'));
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [queueError, setQueueError] = useState<string | null>(null);
+  const [confirmAction, setConfirmAction] = useState<'no_show' | null>(null);
 
-  const dept = DEPARTMENTS[departmentId];
+  // Redirect if not logged in
+  useEffect(() => {
+    if (!session) navigate('/doctor/login', { replace: true });
+  }, [session, navigate]);
+
+  const departmentId = session?.department_id ?? '';
+  const doctorName = session?.name ?? '';
+  const deptName = session?.department_name ?? DEPARTMENTS[departmentId]?.name ?? departmentId;
+  const deptCode = session?.department_code ?? DEPARTMENTS[departmentId]?.code ?? departmentId.slice(0, 3).toUpperCase();
 
   useEffect(() => {
+    if (!departmentId) return;
+
     const update = async () => {
-      await queueService.refreshDepartment(departmentId);
+      try {
+        await queueService.refreshDepartment(departmentId);
+        setQueueError(null);
+      } catch {
+        setQueueError('Queue data unavailable — retrying…');
+      }
       const q = queueService.getQueue(departmentId);
       setQueue(q);
-
-      if (isSessionStarted && doctorName) {
-        const active = q.find(
-          (patient) =>
-            (patient.status === PatientStatus.CALLED || patient.status === PatientStatus.IN_CONSULTATION) &&
-            patient.assignedDoctor === doctorName,
-        );
-        setCurrentPatient(active || null);
-      }
+      const active = q.find(
+        (patient) => (patient.status === PatientStatus.CALLED || patient.status === PatientStatus.IN_CONSULTATION)
+          && patient.assignedDoctor === doctorName,
+      );
+      setCurrentPatient(active ?? null);
     };
-
     void update();
-    const unsub = queueService.subscribe(() => {
-      void update();
-    }, departmentId);
+    const unsub = queueService.subscribe(() => { void update(); }, departmentId);
     return () => unsub();
-  }, [departmentId, isSessionStarted, doctorName]);
+  }, [departmentId, doctorName]);
 
-  const handleCall = async (id: string) => {
-    if (currentPatient) return; // Prevent calling if already busy
-    await queueService.updateStatus(id, PatientStatus.CALLED, undefined, doctorName);
+  const handleCallNext = async () => {
+    if (currentPatient) return;
+    setActionError(null);
+    try {
+      const claimed = await queueService.callNextFromDepartment(departmentId, doctorName);
+      if (!claimed) {
+        setActionError('No waiting patients in department pool.');
+      }
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to call next patient.');
+    }
   };
 
-  const handleComplete = async (id: string) => {
-    await queueService.updateStatus(id, PatientStatus.COMPLETED, notes, doctorName);
-    setNotes('');
-    setCurrentPatient(null);
+  const handleComplete = async (id: string, prescriptionNotes?: string) => {
+    setActionError(null);
+    try {
+      await queueService.updateStatus(id, PatientStatus.COMPLETED, prescriptionNotes ?? notes, doctorName);
+      setNotes('');
+      setCurrentPatient(null);
+      setConfirmAction(null);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to complete visit.');
+    }
+  };
+
+  const handleReferToLab = async (id: string) => {
+    setActionError(null);
+    const labNotes = notes ? `${notes}\n\nReferred to Lab for testing.` : 'Referred to Lab for testing.';
+    try {
+      await queueService.updateStatus(id, PatientStatus.COMPLETED, labNotes, doctorName);
+      setNotes('');
+      setCurrentPatient(null);
+      setConfirmAction(null);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to refer patient.');
+    }
   };
 
   const handleNoShow = async (id: string) => {
-    if (confirm('Mark this patient as No Show?')) {
+    setActionError(null);
+    try {
       await queueService.updateStatus(id, PatientStatus.NO_SHOW, undefined, doctorName);
       setNotes('');
       setCurrentPatient(null);
+      setConfirmAction(null);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to mark no-show.');
     }
   };
 
-  const handleLogin = (e: React.FormEvent) => {
-    e.preventDefault();
-    if(doctorName.trim()) {
-      sessionStorage.setItem('mediqueue_doctor_name', doctorName);
-      setIsSessionStarted(true);
-    }
-  };
-  
   const handleLogout = () => {
-    sessionStorage.removeItem('mediqueue_doctor_name');
-    onLogout();
+    queueService.doctorLogout();
+    navigate('/doctor/login', { replace: true });
   };
 
-  // --- View: Doctor Login ---
-  if (!isSessionStarted) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-100 via-white to-slate-200 flex items-center justify-center p-4">
-        <div className="max-w-md w-full bg-white rounded-2xl shadow-2xl overflow-hidden animate-fade-in-up border border-slate-200">
-           <div className={`p-6 ${dept.color} text-white text-center`}>
-             <Stethoscope size={48} className="mx-auto mb-4 opacity-80" />
-             <h2 className="text-2xl font-bold">Doctor Login</h2>
-             <p className="opacity-90">{dept.name}</p>
-           </div>
-           <div className="p-8">
-             <form onSubmit={handleLogin} className="space-y-6">
-                <div>
-                   <label className="block text-sm font-medium text-gray-700 mb-2">Enter your name to start</label>
-                   <input 
-                      type="text" 
-                      required
-                      autoFocus
-                      placeholder="e.g. Dr. Smith"
-                      value={doctorName}
-                      onChange={e => setDoctorName(e.target.value)}
-                      className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 outline-none"
-                   />
-                </div>
-                <button type="submit" className="w-full bg-gray-900 text-white py-3 rounded-lg font-bold hover:bg-black transition-colors">
-                  Start Session
-                </button>
-                <button onClick={onLogout} type="button" className="w-full text-gray-500 text-sm py-2 hover:text-gray-700">
-                  Cancel
-                </button>
-             </form>
-           </div>
-        </div>
-      </div>
-    );
-  }
+  if (!session) return null;
 
-  // Waiting list should ONLY show patients with status WAITING.
-  // Patients called by *other* doctors should not appear here.
-  const waitingList = queue.filter(p => p.status === PatientStatus.WAITING);
+  const waitingList = queue.filter((patient) => patient.status === PatientStatus.WAITING);
+  const completedCount = queue.filter((patient) => patient.status === PatientStatus.COMPLETED).length;
 
-  // Processed count (for stats)
-  const patientsProcessedCount = queue.filter(p => p.status === PatientStatus.COMPLETED).length;
-
-  // --- View: Dashboard ---
   return (
-    <div className="min-h-screen bg-gray-100 flex flex-col md:flex-row">
-      {/* Sidebar / Info Panel */}
-      <div className="w-full md:w-80 bg-white border-r border-slate-200 flex flex-col h-screen sticky top-0">
-        <div className={`p-6 ${dept.color} text-white`}>
-          <div className="flex items-center gap-3 mb-2">
-            <div className="bg-white/20 p-2 rounded-full"><UserCheck size={20} /></div>
-            <div>
-              <h1 className="text-lg font-bold">{doctorName}</h1>
-              <p className="text-xs opacity-80 uppercase tracking-wide">On Duty</p>
-            </div>
+    <div className="min-h-screen bg-background flex flex-col">
+      {/* Header */}
+      <header className="border-b border-border px-5 py-3 flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-2.5">
+          <div className="h-9 w-9 bg-primary text-primary-foreground rounded-md flex items-center justify-center">
+            <Activity size={18} />
           </div>
-          <div className="h-px bg-white/20 my-4"></div>
-          <h2 className="font-semibold">{dept.name}</h2>
+          <div>
+            <p className="text-sm font-bold text-foreground leading-tight">{doctorName}</p>
+            <p className="text-xs text-muted-foreground">{deptCode} — {deptName}</p>
+          </div>
         </div>
-        
-        <div className="p-6 flex-1 overflow-y-auto">
-          <div className="mb-6">
-            <h3 className="text-sm font-semibold text-gray-500 uppercase mb-2">Queue Stats</h3>
-            <div className="grid grid-cols-2 gap-4">
-               <div className="bg-gray-50 p-3 rounded-lg text-center">
-                 <span className="block text-2xl font-bold text-gray-800">{waitingList.length}</span>
-                 <span className="text-xs text-gray-500">Waiting</span>
-               </div>
-               <div className="bg-gray-50 p-3 rounded-lg text-center">
-                 <span className="block text-2xl font-bold text-green-600">{patientsProcessedCount}</span>
-                 <span className="text-xs text-gray-500">Processed</span>
-               </div>
-            </div>
+        <div className="flex items-center gap-2 ml-auto flex-wrap">
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-surface border border-border">
+            <Users size={12} className="text-primary" />
+            <span className="text-xs font-semibold text-foreground">{waitingList.length}</span>
+            <span className="text-xs text-muted-foreground">waiting</span>
           </div>
-          
-          <button 
-            onClick={handleLogout}
-            className="w-full flex items-center justify-center gap-2 text-red-600 p-3 hover:bg-red-50 rounded-lg transition-colors mt-auto"
-          >
-            <LogOut size={16} /> End Session
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-surface border border-border">
+            <CheckCircle size={12} className="text-primary" />
+            <span className="text-xs font-semibold text-foreground">{completedCount} done</span>
+          </div>
+          <button onClick={handleLogout} aria-label="Logout" className="btn-ghost flex items-center gap-1.5 text-sm">
+            <LogOut size={14} /> Logout
           </button>
         </div>
-      </div>
+      </header>
 
-      {/* Main Content */}
-      <div className="flex-1 p-6 md:p-8 overflow-y-auto bg-slate-50/60">
-        
-        {/* Active Patient Area */}
-        <div className="mb-8">
-          <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
-            <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
-            Now Serving
-          </h2>
-          
-          {currentPatient ? (
-            <div className="bg-white rounded-xl shadow-lg border border-blue-100 p-6 animate-fade-in">
-              <div className="flex justify-between items-start mb-6">
-                <div>
-                  <h1 className="text-4xl font-bold text-gray-900 mb-1">{currentPatient.tokenNumber}</h1>
-                  <p className="text-xl text-gray-600">{currentPatient.name}, {currentPatient.age}</p>
+      <main className="flex-1 p-5 md:p-6">
+        <div className="max-w-6xl mx-auto space-y-5">
+          {queueError && <div className="alert alert-warn"><Clock size={14} />{queueError}</div>}
+          {actionError && <div className="alert alert-error"><AlertTriangle size={14} />{actionError}</div>}
+
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-5 items-start">
+            {/* Queue list */}
+            <div className="lg:col-span-2 space-y-3">
+              <div className="flex items-center justify-between">
+                <h3>Queue</h3>
+                <div className="flex items-center gap-2">
+                  <span className="badge badge-primary">{waitingList.length}</span>
+                  <button
+                    type="button"
+                    onClick={() => void handleCallNext()}
+                    disabled={!!currentPatient || waitingList.length === 0}
+                    className="btn-primary btn-sm"
+                  >
+                    Call Next
+                  </button>
                 </div>
-                <div className="text-right">
-                  <span className="inline-block px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm font-bold">
-                    In Consultation
-                  </span>
-                  {currentPatient.assignedDoctor && (
-                     <p className="text-xs text-gray-500 mt-1">with {currentPatient.assignedDoctor}</p>
+              </div>
+
+              {waitingList.length === 0 ? (
+                <div className="card p-8 text-center text-sm">Queue is clear.</div>
+              ) : (
+                <div className="space-y-2 no-scrollbar overflow-y-auto" style={{ maxHeight: '75vh' }}>
+                  {waitingList.map((patient) => {
+                    const waitTime = Math.floor((Date.now() - patient.checkInTime) / 60000);
+                    const severe = isProblemSevere(patient.problemDescription);
+                    return (
+                      <div
+                        key={patient.id}
+                        className={`card p-3.5 ${patient.isUrgent ? 'border-destructive/45' : ''}`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className={`flex-shrink-0 h-10 w-10 rounded-full flex items-center justify-center font-bold text-sm border-2 ${
+                              patient.isUrgent
+                                ? 'bg-destructive/10 border-destructive/50 text-destructive'
+                                : 'bg-surface-muted border-border text-foreground'
+                            }`}>
+                              {patient.tokenNumber.split('-')[1] ?? patient.tokenNumber}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="font-semibold text-foreground text-sm truncate">{patient.name}</span>
+                                <span className="text-xs text-muted-foreground">{patient.age}y</span>
+                                {patient.isUrgent && (
+                                  <span className="badge badge-destructive text-[10px]">URGENT</span>
+                                )}
+                              </div>
+                              {patient.problemDescription && (
+                                <p className={`text-xs mt-0.5 truncate max-w-[200px] ${severe ? 'text-destructive font-semibold' : 'text-muted-foreground'}`}>
+                                  {patient.problemDescription}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1 text-xs text-muted-foreground flex-shrink-0">
+                            <Clock size={11} />{waitTime}m
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Active patient */}
+            <div className="lg:col-span-3 space-y-4">
+              <div className="flex items-center gap-2">
+                <span className="h-2.5 w-2.5 rounded-full bg-primary animate-pulse" />
+                <h3>Active Patient</h3>
+              </div>
+
+              {currentPatient ? (
+                <div className="card p-6">
+                  <div className="flex items-start justify-between mb-5">
+                    <div>
+                      <div className="text-4xl font-bold text-foreground leading-none mb-2">{currentPatient.tokenNumber}</div>
+                      <p className="text-base font-semibold text-secondary">
+                        {currentPatient.name}, <span className="text-muted-foreground font-normal">{currentPatient.age}y</span>
+                        {currentPatient.gender && <span className="text-muted-foreground font-normal"> · {currentPatient.gender}</span>}
+                      </p>
+                    </div>
+                    <div className="flex flex-col items-end gap-2">
+                      <span className="badge badge-success">In Consultation</span>
+                      {currentPatient.isUrgent && (
+                        <span className="badge badge-destructive flex items-center gap-1">
+                          <AlertTriangle size={9} />URGENT
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="bg-surface-muted border border-border rounded-lg p-4 mb-5">
+                    <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-2">Patient's Problem</p>
+                    {currentPatient.problemDescription ? (
+                      <p className={`text-sm leading-relaxed ${isProblemSevere(currentPatient.problemDescription) ? 'text-destructive font-semibold' : 'text-foreground'}`}>
+                        {currentPatient.problemDescription}
+                      </p>
+                    ) : (
+                      <span className="text-sm text-muted-foreground">No description provided</span>
+                    )}
+                  </div>
+
+                  <div className="mb-5">
+                    <label className="block text-sm font-semibold text-foreground mb-2">Doctor's Notes / Prescription</label>
+                    <textarea
+                      className="input-field text-sm"
+                      style={{ minHeight: 100 }}
+                      placeholder="Enter diagnosis, prescription, or lab instructions…"
+                      value={notes}
+                      onChange={(event) => setNotes(event.target.value)}
+                    />
+                  </div>
+
+                  {confirmAction === 'no_show' ? (
+                    <div className="bg-destructive/10 border border-destructive/40 rounded-lg p-4">
+                      <p className="text-sm font-semibold text-destructive mb-3">Confirm No-Show for token {currentPatient.tokenNumber}?</p>
+                      <div className="flex gap-3">
+                        <button type="button" onClick={() => setConfirmAction(null)} className="btn-ghost btn-sm flex-1 justify-center">
+                          Cancel
+                        </button>
+                        <button type="button" onClick={() => void handleNoShow(currentPatient.id)} className="btn-danger btn-sm flex-1 justify-center">
+                          <XOctagon size={14} /> Confirm No-Show
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex gap-3 flex-wrap">
+                      <button type="button" onClick={() => setConfirmAction('no_show')} className="btn-ghost flex items-center gap-2 text-destructive hover:bg-destructive/10">
+                        <XOctagon size={15} /> No Show
+                      </button>
+                      <button type="button" onClick={() => void handleReferToLab(currentPatient.id)} className="btn-outline flex items-center gap-2">
+                        <FlaskConical size={15} /> Refer to Lab
+                      </button>
+                      <button type="button" onClick={() => void handleComplete(currentPatient.id)} className="btn-success flex-1 justify-center">
+                        <CheckCircle size={16} /> Complete Visit
+                      </button>
+                    </div>
                   )}
                 </div>
-              </div>
-
-              <div className="bg-gray-50 p-4 rounded-lg mb-6 border border-gray-200">
-                <p className="text-sm font-bold text-gray-500 uppercase mb-2">Reported Symptoms</p>
-                <div className="flex flex-wrap gap-2">
-                  {currentPatient.symptoms.map(s => (
-                    <span key={s} className="bg-white border border-gray-300 px-3 py-1 rounded-full text-sm">{s}</span>
-                  ))}
+              ) : (
+                <div className="card p-10 flex flex-col items-center text-center gap-3">
+                  <div className="icon-circle icon-circle-muted opacity-60">
+                    <Inbox size={24} />
+                  </div>
+                  <p className="font-medium">No patient currently being served.</p>
+                  <p className="text-sm">Click "Call Next" to serve the next patient.</p>
                 </div>
-              </div>
-
-              <div className="mb-6">
-                 <label className="block text-sm font-medium text-gray-700 mb-2">Doctor's Notes / Prescription</label>
-                 <textarea 
-                    className="w-full h-32 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none resize-none"
-                    placeholder="Enter notes, prescriptions, or lab instructions here..."
-                    value={notes}
-                    onChange={e => setNotes(e.target.value)}
-                 />
-              </div>
-
-              <div className="flex gap-4">
-                <button 
-                  onClick={() => handleNoShow(currentPatient.id)}
-                  className="px-6 py-3 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg font-bold shadow-sm transition-colors flex items-center gap-2"
-                >
-                  <XOctagon size={20} /> No Show
-                </button>
-                <button 
-                  onClick={() => handleComplete(currentPatient.id)}
-                  className="flex-1 bg-green-600 hover:bg-green-700 text-white py-3 rounded-lg font-bold shadow-md transition-colors flex justify-center items-center gap-2"
-                >
-                  <CheckCircle size={20} /> Complete Visit
-                </button>
-              </div>
+              )}
             </div>
-          ) : (
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8 text-center text-gray-400">
-              <RefreshCw className="mx-auto mb-3 opacity-50" size={48} />
-              <p>No patient currently being served.</p>
-              <p className="text-sm">Select 'Call' from the waiting list below.</p>
-            </div>
-          )}
-        </div>
-
-        {/* Up Next List */}
-        <div>
-          <h2 className="text-xl font-bold text-gray-800 mb-4">Up Next</h2>
-          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
-            {waitingList.length === 0 && (
-               <p className="text-gray-500 col-span-full">Queue is empty.</p>
-            )}
-            {waitingList.map(patient => (
-              <PatientCard 
-                key={patient.id} 
-                patient={patient} 
-                onCall={handleCall}
-                onComplete={handleComplete}
-                onNoShow={handleNoShow}
-                // Disable calling new patients if one is already active
-                actionsDisabled={!!currentPatient}
-              />
-            ))}
           </div>
         </div>
-
-      </div>
+      </main>
     </div>
   );
 };

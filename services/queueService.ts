@@ -1,187 +1,205 @@
-import { Department, DepartmentConfig, Patient, PatientStatus, QueueStats } from '../types';
-import { DEPARTMENTS, URGENT_SYMPTOMS } from '../constants';
+import { RealtimeChannel } from '@supabase/supabase-js';
+import { Department, DepartmentConfig, Gender, Patient, PatientStatus, QueueStats } from '../types';
+import { DEPARTMENTS, URGENT_KEYWORDS } from '../constants';
+import { supabase } from './supabaseClient';
 
-const API_BASE = (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_API_BASE_URL ?? 'http://localhost:4000/api/v1';
 const STORAGE_PATIENT_ID = 'mediqueue_patient_id';
-const STAFF_TOKEN_PREFIX = 'medique_staff_token_';
+const STORAGE_GUEST_UUID = 'mediqueue_guest_uuid';
+const STORAGE_DOCTOR_SESSION = 'mediqueue_doctor_session';
+const STORAGE_ADMIN_AUTH = 'mediqueue_admin_auth';
 
-type StaffRole = 'ADMIN' | 'DOCTOR' | 'RECEPTION';
-
-type ApiVisitState = 'SCANNED' | 'WAITING' | 'URGENT' | 'CALLED' | 'IN_CONSULTATION' | 'COMPLETED' | 'NO_SHOW';
-
-interface ApiVisit {
+interface VisitRow {
   id: string;
-  departmentId: string;
-  tokenNumber: string;
-  patientName: string;
+  patient_name: string;
   age: number;
-  symptoms: string[];
-  state: ApiVisitState;
-  priority: 'NORMAL' | 'URGENT';
-  doctorId?: string;
-  prescriptionText?: string;
+  gender: string | null;
+  problem_description: string | null;
+  symptoms: string[] | null;
+  department_id: string;
+  assigned_doctor_id: string | null;
+  status: 'SCANNED' | 'WAITING' | 'URGENT' | 'CALLED' | 'IN_CONSULTATION' | 'COMPLETED' | 'NO_SHOW';
+  token_number: number;
+  created_at: string;
+  called_at: string | null;
+  completed_at: string | null;
+  prescription_text: string | null;
   version: number;
-  createdAt: number;
-  updatedAt: number;
-  calledAt?: number;
-  consultationStartedAt?: number;
-  completedAt?: number;
-  noShowAt?: number;
+  doctors?: { name?: string | null } | null;
+  departments?: { code?: string | null } | null;
 }
 
-interface QueueSnapshot {
-  departmentId: string;
-  nowServing?: string;
-  visits: ApiVisit[];
+interface DepartmentRow {
+  id: string;
+  name: string;
+  code: string;
+  color: string;
+  is_active: boolean;
+}
+
+function isUrgentText(text: string): boolean {
+  const lower = text.toLowerCase();
+  return URGENT_KEYWORDS.some((kw) => lower.includes(kw));
 }
 
 class QueueService {
   private patientsById = new Map<string, Patient>();
-  private queueByDepartment = new Map<Department, Patient[]>();
-  private listeners = new Set<() => void>();
-  private eventSources = new Map<Department, EventSource>();
-  private fallbackTimer: number | null = null;
+  private queueByDepartment = new Map<string, Patient[]>();
+  private channels = new Map<string, RealtimeChannel>();
+  private subscribers = new Map<string, Set<() => void>>();
   private departmentsCache: Array<DepartmentConfig & { isActive: boolean }> | null = null;
 
-  private notify() {
-    this.listeners.forEach((listener) => listener());
+  getGuestUuid(): string {
+    const existing = localStorage.getItem(STORAGE_GUEST_UUID);
+    if (existing) return existing;
+    const next = crypto.randomUUID();
+    localStorage.setItem(STORAGE_GUEST_UUID, next);
+    return next;
   }
 
-  private async ensureStaffToken(role: StaffRole, userId: string): Promise<string> {
-    const storageKey = `${STAFF_TOKEN_PREFIX}${role}_${userId}`;
-    const cached = localStorage.getItem(storageKey);
-    if (cached) {
-      return cached;
+  private async ensureSession(): Promise<string | null> {
+    try {
+      const { data } = await supabase.auth.getSession();
+      if (data.session?.user?.id) return data.session.user.id;
+      // Attempt anonymous sign-in; returns null if disabled in project settings
+      const { data: anonData } = await supabase.auth.signInAnonymously();
+      return anonData.user?.id ?? null;
+    } catch {
+      return null;
     }
-
-    const response = await fetch(`${API_BASE}/auth/dev-token`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ userId, role }),
-    });
-    if (!response.ok) {
-      throw new Error('Failed to issue staff token');
-    }
-
-    const payload = (await response.json()) as { token: string };
-    localStorage.setItem(storageKey, payload.token);
-    return payload.token;
   }
 
-  private async authHeaders(role: StaffRole, userId: string): Promise<Record<string, string>> {
-    const token = await this.ensureStaffToken(role, userId);
+  private mapVisit(row: VisitRow): Patient {
+    const symptoms = Array.isArray(row.symptoms) ? row.symptoms : [];
+    const problemDesc = row.problem_description ?? '';
+    const isUrgent = row.status === 'URGENT'
+      || isUrgentText(problemDesc)
+      || symptoms.some((s) => isUrgentText(s));
+
+    const status = row.status === 'CALLED'
+      ? PatientStatus.CALLED
+      : row.status === 'IN_CONSULTATION'
+        ? PatientStatus.IN_CONSULTATION
+        : row.status === 'COMPLETED'
+          ? PatientStatus.COMPLETED
+          : row.status === 'NO_SHOW'
+            ? PatientStatus.NO_SHOW
+            : PatientStatus.WAITING;
+
+    const deptCode = row.departments?.code ?? DEPARTMENTS[row.department_id]?.code ?? row.department_id.slice(0, 3).toUpperCase();
     return {
-      authorization: `Bearer ${token}`,
-      'content-type': 'application/json',
-    };
-  }
-
-  private mapVisit(visit: ApiVisit): Patient {
-    const isUrgent = visit.priority === 'URGENT' || visit.state === 'URGENT' || visit.symptoms.some((s) => URGENT_SYMPTOMS.includes(s));
-
-    const status: PatientStatus =
-      visit.state === 'CALLED'
-        ? PatientStatus.CALLED
-        : visit.state === 'IN_CONSULTATION'
-          ? PatientStatus.IN_CONSULTATION
-          : visit.state === 'COMPLETED'
-            ? PatientStatus.COMPLETED
-            : visit.state === 'NO_SHOW'
-              ? PatientStatus.NO_SHOW
-              : PatientStatus.WAITING;
-
-    return {
-      id: visit.id,
-      name: visit.patientName,
-      age: visit.age,
-      symptoms: visit.symptoms,
+      id: row.id,
+      name: row.patient_name,
+      age: row.age,
+      gender: (row.gender as Gender) ?? undefined,
+      problemDescription: row.problem_description ?? undefined,
+      symptoms,
       isUrgent,
-      department: visit.departmentId as Department,
+      department: row.department_id,
       status,
-      tokenNumber: visit.tokenNumber,
-      checkInTime: visit.createdAt,
-      calledTime: visit.calledAt,
-      completedTime: visit.completedAt,
-      notes: visit.prescriptionText,
-      assignedDoctor: visit.doctorId,
-      version: visit.version,
+      tokenNumber: `${deptCode}-${row.token_number}`,
+      checkInTime: new Date(row.created_at).getTime(),
+      calledTime: row.called_at ? new Date(row.called_at).getTime() : undefined,
+      completedTime: row.completed_at ? new Date(row.completed_at).getTime() : undefined,
+      notes: row.prescription_text ?? undefined,
+      assignedDoctor: row.doctors?.name ?? undefined,
+      version: row.version,
     };
-  }
-
-  private ingestSnapshot(snapshot: QueueSnapshot) {
-    const department = snapshot.departmentId as Department;
-    const mapped = snapshot.visits.map((visit) => this.mapVisit(visit));
-    this.queueByDepartment.set(department, mapped);
-    mapped.forEach((patient) => this.patientsById.set(patient.id, patient));
-  }
-
-  private async issueCheckinToken(departmentId: Department): Promise<string> {
-    const headers = await this.authHeaders('ADMIN', 'admin-system');
-    const response = await fetch(`${API_BASE}/admin/checkin-token`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ departmentId, expiresInSec: 600 }),
-    });
-    if (!response.ok) {
-      throw new Error('Failed to create check-in token');
-    }
-    const data = (await response.json()) as { token: string };
-    return data.token;
-  }
-
-  private getFallbackExpectedVersion(patient: Patient): number {
-    return patient.version ?? 1;
   }
 
   async checkIn(
     name: string,
     age: number,
     department: Department,
-    symptoms: string[],
+    problemDescription: string,
+    gender?: Gender,
   ): Promise<Patient> {
-    const signedCheckinToken = await this.issueCheckinToken(department);
-    const idempotencyKey = crypto.randomUUID();
-    const restoreToken = crypto.randomUUID();
+    const authId = await this.ensureSession();
+    const guestUuid = this.getGuestUuid();
 
-    const response = await fetch(`${API_BASE}/patient/checkin`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        departmentId: department,
-        patientName: name,
-        age,
-        symptoms,
-        signedCheckinToken,
-        idempotencyKey,
-        restoreToken,
-      }),
+    // Primary path: use the create_visit RPC (handles token generation atomically)
+    const rpc = await supabase.rpc('create_visit', {
+      p_department_id: department,
+      p_patient_name: name,
+      p_age: age,
+      p_symptoms: [] as string[],
+      p_guest_uuid: guestUuid,
+      p_patient_auth_id: authId,
+      p_gender: gender ?? null,
+      p_problem_description: problemDescription,
     });
 
-    if (!response.ok) {
-      throw new Error('Check-in failed');
+    let row = (rpc.data?.[0] ?? rpc.data) as VisitRow | null;
+    if (rpc.error || !row) {
+      // Fallback: generate token separately then insert
+      const token = await supabase.rpc('generate_token', { dept_id: department });
+      if (token.error) throw new Error(token.error.message);
+
+      const inserted = await supabase
+        .from('visits')
+        .insert({
+          patient_name: name,
+          age,
+          symptoms: [] as string[],
+          department_id: department,
+          status: 'WAITING',
+          token_number: Number(token.data),
+          guest_uuid: guestUuid,
+          patient_auth_id: authId,
+          gender: gender ?? null,
+          problem_description: problemDescription,
+        })
+        .select('*, departments(code), doctors(name)')
+        .single();
+
+      if (inserted.error || !inserted.data) throw new Error(inserted.error?.message ?? 'Check-in failed');
+      row = inserted.data as VisitRow;
     }
 
-    const visit = (await response.json()) as ApiVisit;
-    const patient = this.mapVisit(visit);
-    this.patientsById.set(patient.id, patient);
+    const patient = this.mapVisit(row);
     localStorage.setItem(STORAGE_PATIENT_ID, patient.id);
+    this.patientsById.set(patient.id, patient);
     await this.refreshDepartment(department);
-    this.notify();
+    return patient;
+  }
+
+  /** Find an active visit for the current guest in a given department */
+  async findActiveVisitForGuest(departmentId?: string): Promise<Patient | undefined> {
+    const guestUuid = localStorage.getItem(STORAGE_GUEST_UUID);
+    if (!guestUuid) return undefined;
+
+    let query = supabase
+      .from('visits')
+      .select('*, departments(code), doctors(name)')
+      .eq('guest_uuid', guestUuid)
+      .in('status', ['WAITING', 'URGENT', 'CALLED', 'IN_CONSULTATION'])
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    if (departmentId) {
+      query = query.eq('department_id', departmentId);
+    }
+
+    const { data, error } = await query.maybeSingle();
+    if (error || !data) return undefined;
+
+    const patient = this.mapVisit(data as VisitRow);
+    this.patientsById.set(patient.id, patient);
     return patient;
   }
 
   async fetchPatient(patientId: string): Promise<Patient | undefined> {
-    const response = await fetch(`${API_BASE}/patient/visits/${patientId}`);
-    if (response.status === 404) {
+    const response = await supabase
+      .from('visits')
+      .select('*, departments(code), doctors(name)')
+      .eq('id', patientId)
+      .maybeSingle();
+
+    if (response.error || !response.data) {
       this.patientsById.delete(patientId);
       return undefined;
     }
-    if (!response.ok) {
-      throw new Error('Failed to fetch patient');
-    }
 
-    const visit = (await response.json()) as ApiVisit;
-    const patient = this.mapVisit(visit);
+    const patient = this.mapVisit(response.data as VisitRow);
     this.patientsById.set(patient.id, patient);
     return patient;
   }
@@ -191,115 +209,142 @@ class QueueService {
   }
 
   async getManagedDepartments(): Promise<Array<DepartmentConfig & { isActive: boolean }>> {
-    const headers = await this.authHeaders('RECEPTION', 'reception-system');
-    const response = await fetch(`${API_BASE}/admin/departments`, { headers });
-    if (!response.ok) {
-      return Object.values(DEPARTMENTS).map((department) => ({ ...department, isActive: true }));
+    if (this.departmentsCache) return this.departmentsCache;
+
+    const response = await supabase
+      .from('departments')
+      .select('id, name, code, color, is_active')
+      .order('name', { ascending: true });
+
+    if (response.error || !response.data) {
+      const fallback = Object.values(DEPARTMENTS).map((department) => ({ ...department, isActive: true }));
+      this.departmentsCache = fallback;
+      return fallback;
     }
 
-    const records = (await response.json()) as Array<DepartmentConfig & { isActive: boolean }>;
+    const records = (response.data as DepartmentRow[]).map((department) => ({
+      id: department.id,
+      name: department.name,
+      code: department.code,
+      color: department.color,
+      isActive: department.is_active,
+    }));
     this.departmentsCache = records;
     return records;
   }
 
   async getDepartments(): Promise<DepartmentConfig[]> {
     const records = await this.getManagedDepartments();
-    return records.filter((record) => record.isActive);
+    return records.filter((department) => department.isActive);
   }
 
   async updateDepartment(departmentId: Department, payload: { isActive?: boolean; name?: string; code?: string }): Promise<void> {
-    const headers = await this.authHeaders('ADMIN', 'admin-system');
-    const response = await fetch(`${API_BASE}/admin/departments/${departmentId}`, {
-      method: 'PUT',
-      headers,
-      body: JSON.stringify(payload),
-    });
-    if (!response.ok) {
-      throw new Error('Failed to update department');
-    }
+    const response = await supabase
+      .from('departments')
+      .update({
+        is_active: payload.isActive,
+        name: payload.name,
+        code: payload.code?.toUpperCase(),
+      })
+      .eq('id', departmentId);
+    if (response.error) throw new Error(response.error.message);
+    this.departmentsCache = null;
+  }
+
+  async createDepartment(payload: { id: string; name: string; code: string; color?: string }): Promise<void> {
+    const response = await supabase
+      .from('departments')
+      .insert({
+        id: payload.id.trim().toUpperCase(),
+        name: payload.name.trim(),
+        code: payload.code.trim().toUpperCase(),
+        color: payload.color ?? 'bg-dept-general',
+        is_active: true,
+      });
+    if (response.error) throw new Error(response.error.message);
     this.departmentsCache = null;
   }
 
   async refreshDepartment(department: Department): Promise<Patient[]> {
-    const headers = await this.authHeaders('RECEPTION', 'reception-system');
-    const response = await fetch(`${API_BASE}/departments/${department}/queue`, { headers });
-    if (!response.ok) {
-      throw new Error('Failed to fetch department queue');
-    }
-    const snapshot = (await response.json()) as QueueSnapshot;
-    this.ingestSnapshot(snapshot);
-    this.notify();
-    return this.getQueue(department);
+    const response = await supabase
+      .from('visits')
+      .select('*, departments(code), doctors(name)')
+      .eq('department_id', department)
+      .order('created_at', { ascending: true });
+
+    if (response.error) throw new Error(response.error.message);
+    const mapped = (response.data as VisitRow[]).map((row) => this.mapVisit(row));
+    this.queueByDepartment.set(department, mapped);
+    mapped.forEach((patient) => this.patientsById.set(patient.id, patient));
+    return mapped.slice();
   }
 
   async refreshAllDepartments(): Promise<void> {
-    const departments = Object.values(Department);
-    await Promise.all(departments.map((department) => this.refreshDepartment(department)));
+    const departments = await this.getManagedDepartments();
+    const active = departments.filter((department) => department.isActive);
+    await Promise.all(active.map((department) => this.refreshDepartment(department.id)));
   }
 
   getQueue(department?: Department): Patient[] {
-    if (department) {
-      return (this.queueByDepartment.get(department) ?? []).slice();
-    }
-
+    if (department) return (this.queueByDepartment.get(department) ?? []).slice();
     return [...this.queueByDepartment.values()].flat();
   }
 
-  private async transitionVisit(
-    patient: Patient,
-    action: 'call' | 'start' | 'complete' | 'no-show',
-    doctorName: string,
-    prescriptionText?: string,
-  ): Promise<Patient> {
-    const headers = await this.authHeaders('DOCTOR', doctorName || 'doctor-user');
-    const body: Record<string, unknown> = {
-      expectedVersion: this.getFallbackExpectedVersion(patient),
-    };
-    if (prescriptionText) {
-      body.prescriptionText = prescriptionText;
-    }
+  async callNextFromDepartment(departmentId: Department, doctorName: string): Promise<Patient | null> {
+    const claim = await supabase.rpc('claim_next_visit', {
+      p_department_id: departmentId,
+      p_doctor_name: doctorName,
+    });
+    if (claim.error || !claim.data) return null;
 
-    const response = await fetch(`${API_BASE}/doctor/visits/${patient.id}/${action}`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
+    const raw = Array.isArray(claim.data) ? claim.data[0] : claim.data;
+    if (!raw) return null;
+    const row = raw as VisitRow;
+    const patient = this.mapVisit(row);
+    this.patientsById.set(patient.id, patient);
+    await this.refreshDepartment(departmentId);
+    return patient;
+  }
+
+  private async transitionVisit(patient: Patient, toStatus: 'IN_CONSULTATION' | 'COMPLETED' | 'NO_SHOW', doctorName: string, notes?: string): Promise<Patient> {
+    const response = await supabase.rpc('transition_visit', {
+      p_visit_id: patient.id,
+      p_to_status: toStatus,
+      p_doctor_name: doctorName,
+      p_prescription_text: notes ?? null,
+      p_expected_version: patient.version ?? 1,
     });
 
-    if (!response.ok) {
-      throw new Error('Visit transition failed');
-    }
-
-    const next = this.mapVisit((await response.json()) as ApiVisit);
+    if (response.error || !response.data) throw new Error(response.error?.message ?? 'Visit transition failed');
+    const row = (Array.isArray(response.data) ? response.data[0] : response.data) as VisitRow;
+    const next = this.mapVisit(row);
     this.patientsById.set(next.id, next);
     await this.refreshDepartment(next.department);
-    this.notify();
     return next;
   }
 
   async updateStatus(id: string, status: PatientStatus, notes?: string, doctorName = 'doctor-user') {
     const existing = this.patientsById.get(id) ?? (await this.fetchPatient(id));
-    if (!existing) {
-      throw new Error('Patient not found');
-    }
+    if (!existing) throw new Error('Patient not found');
 
     if (status === PatientStatus.CALLED) {
-      await this.transitionVisit(existing, 'call', doctorName);
+      await this.callNextFromDepartment(existing.department, doctorName);
       return;
     }
 
     if (status === PatientStatus.COMPLETED) {
       const latest = this.patientsById.get(id) ?? existing;
       if (latest.status === PatientStatus.CALLED) {
-        const started = await this.transitionVisit(latest, 'start', doctorName);
-        await this.transitionVisit(started, 'complete', doctorName, notes);
+        const started = await this.transitionVisit(latest, 'IN_CONSULTATION', doctorName);
+        await this.transitionVisit(started, 'COMPLETED', doctorName, notes);
         return;
       }
-      await this.transitionVisit(latest, 'complete', doctorName, notes);
+      await this.transitionVisit(latest, 'COMPLETED', doctorName, notes);
       return;
     }
 
     if (status === PatientStatus.NO_SHOW) {
-      await this.transitionVisit(existing, 'no-show', doctorName);
+      await this.transitionVisit(existing, 'NO_SHOW', doctorName);
     }
   }
 
@@ -317,56 +362,170 @@ class QueueService {
       }, 0);
       avgWaitTime = Math.round(totalMinutes / completedPatients.length);
     }
-
     return { waiting, completed, avgWaitTime, urgentCount };
   }
 
-  async getAllStats(): Promise<Record<Department, QueueStats>> {
+  async getAllStats(): Promise<Record<string, QueueStats>> {
     await this.refreshAllDepartments();
-    const result = {} as Record<Department, QueueStats>;
-    Object.values(Department).forEach((department) => {
-      result[department] = this.getStats(department);
+    const departments = await this.getManagedDepartments();
+    const result: Record<string, QueueStats> = {};
+    departments.forEach((department) => {
+      result[department.id] = this.getStats(department.id);
     });
     return result;
   }
 
   subscribe(callback: () => void, department?: Department) {
-    this.listeners.add(callback);
+    const key = department ? `dept:${department}` : 'dept:ALL';
+    const listeners = this.subscribers.get(key) ?? new Set<() => void>();
+    listeners.add(callback);
+    this.subscribers.set(key, listeners);
 
-    if (department && !this.eventSources.has(department)) {
-      const source = new EventSource(`${API_BASE}/events/departments/${department}`);
-      source.addEventListener('queue.updated', (event) => {
-        const message = event as MessageEvent;
-        const snapshot = JSON.parse(message.data) as QueueSnapshot;
-        this.ingestSnapshot(snapshot);
-        this.notify();
-      });
-      source.onerror = () => {
-        source.close();
-        this.eventSources.delete(department);
+    // Polling fallback: ensures updates even if Realtime is not enabled
+    const pollInterval = setInterval(() => {
+      const fire = async () => {
+        if (department) await this.refreshDepartment(department).catch(() => undefined);
+        else await this.refreshAllDepartments().catch(() => undefined);
+        callback();
       };
-      this.eventSources.set(department, source);
-    }
+      void fire();
+    }, 3000);
 
-    if (!department && this.fallbackTimer === null) {
-      this.fallbackTimer = window.setInterval(() => {
-        this.notify();
-      }, 5000);
+    if (!this.channels.has(key)) {
+      const channel = supabase
+        .channel(key)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'visits',
+            filter: department ? `department_id=eq.${department}` : undefined,
+          },
+          async () => {
+            if (department) await this.refreshDepartment(department).catch(() => undefined);
+            else await this.refreshAllDepartments().catch(() => undefined);
+            const callbacks = this.subscribers.get(key);
+            callbacks?.forEach((listener) => listener());
+          },
+        )
+        .subscribe();
+      this.channels.set(key, channel);
     }
 
     return () => {
-      this.listeners.delete(callback);
+      clearInterval(pollInterval);
+      const callbacks = this.subscribers.get(key);
+      if (!callbacks) return;
+      callbacks.delete(callback);
+      if (callbacks.size === 0) {
+        this.subscribers.delete(key);
+        const channel = this.channels.get(key);
+        if (channel) {
+          void supabase.removeChannel(channel);
+          this.channels.delete(key);
+        }
+      }
     };
   }
 
   async clearData() {
-    const headers = await this.authHeaders('ADMIN', 'admin-system');
-    await fetch(`${API_BASE}/admin/reset`, { method: 'POST', headers, body: '{}' });
+    await supabase.rpc('admin_reset');
     localStorage.removeItem(STORAGE_PATIENT_ID);
     this.patientsById.clear();
     this.queueByDepartment.clear();
-    this.notify();
   }
+
+  /* ── Doctor auth ─────────────────────────────────── */
+
+  async doctorLogin(email: string, password: string): Promise<DoctorSession | null> {
+    const { data, error } = await supabase.rpc('verify_doctor_login', {
+      p_email: email,
+      p_password: password,
+    });
+    if (error || !data) return null;
+    const session: DoctorSession = data as DoctorSession;
+    localStorage.setItem(STORAGE_DOCTOR_SESSION, JSON.stringify(session));
+    return session;
+  }
+
+  getDoctorSession(): DoctorSession | null {
+    const raw = localStorage.getItem(STORAGE_DOCTOR_SESSION);
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as DoctorSession;
+    } catch {
+      return null;
+    }
+  }
+
+  doctorLogout(): void {
+    localStorage.removeItem(STORAGE_DOCTOR_SESSION);
+  }
+
+  /* ── Admin auth ──────────────────────────────────── */
+
+  async adminLogin(password: string): Promise<boolean> {
+    const { data, error } = await supabase.rpc('verify_admin_login', {
+      p_password: password,
+    });
+    if (error) return false;
+    const ok = data === true;
+    if (ok) sessionStorage.setItem(STORAGE_ADMIN_AUTH, '1');
+    return ok;
+  }
+
+  isAdminAuthenticated(): boolean {
+    return sessionStorage.getItem(STORAGE_ADMIN_AUTH) === '1';
+  }
+
+  adminLogout(): void {
+    sessionStorage.removeItem(STORAGE_ADMIN_AUTH);
+  }
+
+  /* ── Doctor management (admin) ───────────────────── */
+
+  async createDoctorAccount(name: string, email: string, password: string, departmentId: string): Promise<{ id: string; name: string; email: string; department_id: string }> {
+    const { data, error } = await supabase.rpc('create_doctor_account', {
+      p_name: name,
+      p_email: email,
+      p_password: password,
+      p_department_id: departmentId,
+    });
+    if (error) throw new Error(error.message);
+    return data as { id: string; name: string; email: string; department_id: string };
+  }
+
+  async listDoctors(): Promise<DoctorRecord[]> {
+    const { data, error } = await supabase.rpc('list_doctors');
+    if (error) throw new Error(error.message);
+    return (data ?? []) as DoctorRecord[];
+  }
+
+  async deleteDoctor(doctorId: string): Promise<void> {
+    const { error } = await supabase.rpc('delete_doctor', { p_doctor_id: doctorId });
+    if (error) throw new Error(error.message);
+  }
+}
+
+export interface DoctorSession {
+  id: string;
+  name: string;
+  email: string;
+  department_id: string;
+  department_name: string;
+  department_code: string;
+  status: string;
+}
+
+export interface DoctorRecord {
+  id: string;
+  name: string;
+  email: string;
+  department_id: string;
+  department_name: string;
+  status: string;
+  created_at: string;
 }
 
 export const queueService = new QueueService();

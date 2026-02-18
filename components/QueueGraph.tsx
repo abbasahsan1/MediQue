@@ -1,67 +1,56 @@
 import React from 'react';
 import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-  Cell
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts';
 import { QueueStats, Department } from '../types';
 import { DEPARTMENTS } from '../constants';
+import { BarChart2 } from 'lucide-react';
 
 interface QueueGraphProps {
   stats: Record<Department, QueueStats>;
 }
 
 export const QueueGraph: React.FC<QueueGraphProps> = ({ stats }) => {
-  const data = Object.values(DEPARTMENTS).map((dept) => ({
-    name: dept.name.split(' ')[0], // Shorten name
-    waiting: stats[dept.id].waiting,
-    completed: stats[dept.id].completed,
-    urgent: stats[dept.id].urgentCount,
-    avgWait: stats[dept.id].avgWaitTime,
-    color: dept.color.replace('bg-', 'text-').replace('-500', '-600') // Very rough approximation for demo
-  }));
-
-  // Map tailwind color names to hex for Recharts
-  const getColor = (deptName: string) => {
-    if (deptName.includes('General')) return '#3b82f6';
-    if (deptName.includes('ENT')) return '#6366f1';
-    if (deptName.includes('Orthopedics')) return '#f97316';
-    if (deptName.includes('Dental')) return '#14b8a6';
-    if (deptName.includes('Cardiology')) return '#ef4444';
-    return '#8884d8';
-  };
+  const data = Object.values(DEPARTMENTS).map((dept) => {
+    const stat = stats[dept.id] ?? { waiting: 0, completed: 0, urgentCount: 0, avgWaitTime: 0 };
+    return {
+      name: dept.code,
+      fullName: dept.name,
+      waiting: stat.waiting,
+      completed: stat.completed,
+      urgent: stat.urgentCount,
+    };
+  });
 
   return (
-    <div className="h-80 w-full bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-      <h3 className="text-lg font-semibold text-gray-700 mb-4">Real-time Queue Volume</h3>
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart
-          data={data}
-          margin={{
-            top: 5,
-            right: 30,
-            left: 20,
-            bottom: 5,
-          }}
-        >
-          <CartesianGrid strokeDasharray="3 3" vertical={false} />
-          <XAxis dataKey="name" axisLine={false} tickLine={false} />
-          <YAxis axisLine={false} tickLine={false} />
-          <Tooltip 
-            cursor={{fill: '#f3f4f6'}}
-            contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-          />
-          <Legend />
-          <Bar dataKey="waiting" name="Waiting" stackId="a" fill="#3b82f6" radius={[0,0,4,4]} />
-          <Bar dataKey="urgent" name="Urgent" stackId="a" fill="#ef4444" radius={[4,4,0,0]} />
-        </BarChart>
-      </ResponsiveContainer>
+    <div className="card p-6 h-full">
+      <div className="flex items-center gap-3 mb-6">
+        <div className="icon-circle icon-circle-brand" style={{ width: 38, height: 38 }}>
+          <BarChart2 size={17} />
+        </div>
+        <div>
+          <h3 className="font-bold text-foreground">Real-time Queue Volume</h3>
+          <p className="text-xs text-muted-foreground">Live patient load per department</p>
+        </div>
+      </div>
+      <div className="h-60">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={data} margin={{ top: 4, right: 10, left: -20, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
+            <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: 'var(--muted-foreground)', fontSize: 12 }} />
+            <YAxis axisLine={false} tickLine={false} tick={{ fill: 'var(--muted-foreground)', fontSize: 12 }} />
+            <Tooltip
+              cursor={{ fill: 'var(--surface-muted)' }}
+              contentStyle={{ borderRadius: 12, border: '1px solid var(--border)', boxShadow: 'var(--shadow-1)', fontSize: 13, background: 'var(--surface)' }}
+              labelFormatter={(label) => data.find(d => d.name === label)?.fullName ?? label}
+            />
+            <Legend wrapperStyle={{ fontSize: 12, color: 'var(--secondary)' }} />
+            <Bar dataKey="waiting" name="Waiting" stackId="a" fill="var(--primary)" radius={[0, 0, 4, 4]} />
+            <Bar dataKey="urgent"  name="Urgent"  stackId="a" fill="var(--destructive)" radius={[0, 0, 0, 0]} />
+            <Bar dataKey="completed" name="Completed" fill="var(--success)" radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
     </div>
   );
 };

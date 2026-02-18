@@ -6,6 +6,7 @@ import type {
   QueueEventPublisher,
   VisitRepository,
 } from '../application/ports.js';
+import { VersionConflictError, VisitNotFoundError } from '../domain/errors.js';
 
 const dayKey = (timestamp: number): string => {
   const date = new Date(timestamp);
@@ -28,10 +29,10 @@ export class InMemoryVisitRepository implements VisitRepository {
   async update(visit: Visit, expectedVersion: number): Promise<void> {
     const current = this.visits.get(visit.id);
     if (!current) {
-      throw new Error('Visit not found');
+      throw new VisitNotFoundError(visit.id);
     }
     if (current.version !== expectedVersion) {
-      throw new Error('Version conflict');
+      throw new VersionConflictError();
     }
     this.visits.set(visit.id, { ...visit });
   }

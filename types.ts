@@ -6,18 +6,24 @@ export enum PatientStatus {
   NO_SHOW = 'NO_SHOW',
 }
 
-export enum Department {
-  GENERAL = 'GENERAL',
-  ENT = 'ENT',
-  ORTHOPEDICS = 'ORTHOPEDICS',
-  DENTAL = 'DENTAL',
-  CARDIOLOGY = 'CARDIOLOGY',
-}
+export const Department = {
+  GENERAL: 'GENERAL',
+  ENT: 'ENT',
+  ORTHOPEDICS: 'ORTHOPEDICS',
+  DENTAL: 'DENTAL',
+  CARDIOLOGY: 'CARDIOLOGY',
+} as const;
+
+export type Department = string;
+
+export type Gender = 'Male' | 'Female' ;
 
 export interface Patient {
   id: string;
   name: string;
   age: number;
+  gender?: Gender;
+  problemDescription?: string;
   symptoms: string[];
   isUrgent: boolean;
   department: Department;
@@ -34,12 +40,12 @@ export interface Patient {
 export interface QueueStats {
   waiting: number;
   completed: number;
-  avgWaitTime: number; // in minutes
+  avgWaitTime: number;
   urgentCount: number;
 }
 
 export interface DepartmentConfig {
-  id: Department;
+  id: string;
   name: string;
   code: string;
   color: string;

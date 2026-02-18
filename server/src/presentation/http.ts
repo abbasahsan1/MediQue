@@ -6,6 +6,7 @@ import type { Request } from 'express';
 import { z } from 'zod';
 import type { QueueUseCases } from '../application/useCases.js';
 import type { InMemoryAuditRepository, InMemoryQueuePublisher } from '../infrastructure/inMemory.js';
+import { InvalidTransitionError, VersionConflictError, VisitNotFoundError } from '../domain/errors.js';
 import {
   authMiddleware,
   correlationIdMiddleware,
@@ -25,11 +26,11 @@ interface DepartmentRecord {
 }
 
 const DEPARTMENT_REGISTRY: DepartmentRecord[] = [
-  { id: 'GENERAL', name: 'General Medicine', code: 'GM', color: 'bg-blue-500', isActive: true },
-  { id: 'ENT', name: 'ENT (Ear, Nose, Throat)', code: 'EN', color: 'bg-indigo-500', isActive: true },
-  { id: 'ORTHOPEDICS', name: 'Orthopedics', code: 'OR', color: 'bg-orange-500', isActive: true },
-  { id: 'DENTAL', name: 'Dental Care', code: 'DE', color: 'bg-teal-500', isActive: true },
-  { id: 'CARDIOLOGY', name: 'Cardiology', code: 'CA', color: 'bg-red-500', isActive: true },
+  { id: 'GENERAL', name: 'General Medicine', code: 'GM', color: 'bg-dept-general', isActive: true },
+  { id: 'ENT', name: 'ENT (Ear, Nose, Throat)', code: 'EN', color: 'bg-dept-ent', isActive: true },
+  { id: 'ORTHOPEDICS', name: 'Orthopedics', code: 'OR', color: 'bg-dept-orthopedics', isActive: true },
+  { id: 'DENTAL', name: 'Dental Care', code: 'DE', color: 'bg-dept-dental', isActive: true },
+  { id: 'CARDIOLOGY', name: 'Cardiology', code: 'CA', color: 'bg-dept-cardiology', isActive: true },
 ];
 
 const checkInSchema = z.object({
@@ -85,7 +86,15 @@ export const createHttpApp = (
     }
 
     try {
-      const visit = await useCases.checkIn({ ...payload, traceId: req.traceId ?? crypto.randomUUID() });
+      const visit = await useCases.checkIn({
+        departmentId: payload.departmentId,
+        patientName: payload.patientName,
+        age: payload.age,
+        symptoms: payload.symptoms,
+        restoreToken: payload.restoreToken,
+        idempotencyKey: payload.idempotencyKey,
+        traceId: req.traceId ?? crypto.randomUUID(),
+      });
       res.status(201).json(visit);
     } catch (error) {
       res.status(409).json({ error: error instanceof Error ? error.message : 'Check-in failed' });
@@ -124,7 +133,10 @@ export const createHttpApp = (
       });
       res.json(result);
     } catch (error) {
-      res.status(409).json({ error: error instanceof Error ? error.message : 'Transition failed' });
+      if (error instanceof VisitNotFoundError) { res.status(404).json({ error: error.message }); return; }
+      if (error instanceof InvalidTransitionError) { res.status(422).json({ error: error.message }); return; }
+      if (error instanceof VersionConflictError) { res.status(409).json({ error: error.message }); return; }
+      res.status(500).json({ error: 'Internal server error' });
     }
   });
 
@@ -145,7 +157,10 @@ export const createHttpApp = (
       });
       res.json(result);
     } catch (error) {
-      res.status(409).json({ error: error instanceof Error ? error.message : 'Transition failed' });
+      if (error instanceof VisitNotFoundError) { res.status(404).json({ error: error.message }); return; }
+      if (error instanceof InvalidTransitionError) { res.status(422).json({ error: error.message }); return; }
+      if (error instanceof VersionConflictError) { res.status(409).json({ error: error.message }); return; }
+      res.status(500).json({ error: 'Internal server error' });
     }
   });
 
@@ -167,7 +182,10 @@ export const createHttpApp = (
       });
       res.json(result);
     } catch (error) {
-      res.status(409).json({ error: error instanceof Error ? error.message : 'Transition failed' });
+      if (error instanceof VisitNotFoundError) { res.status(404).json({ error: error.message }); return; }
+      if (error instanceof InvalidTransitionError) { res.status(422).json({ error: error.message }); return; }
+      if (error instanceof VersionConflictError) { res.status(409).json({ error: error.message }); return; }
+      res.status(500).json({ error: 'Internal server error' });
     }
   });
 
@@ -188,12 +206,15 @@ export const createHttpApp = (
       });
       res.json(result);
     } catch (error) {
-      res.status(409).json({ error: error instanceof Error ? error.message : 'Transition failed' });
+      if (error instanceof VisitNotFoundError) { res.status(404).json({ error: error.message }); return; }
+      if (error instanceof InvalidTransitionError) { res.status(422).json({ error: error.message }); return; }
+      if (error instanceof VersionConflictError) { res.status(409).json({ error: error.message }); return; }
+      res.status(500).json({ error: 'Internal server error' });
     }
   });
 
-  app.get('/api/v1/events/departments/:departmentId', (req, res) => {
-    const departmentId = req.params.departmentId;
+  app.get('/api/v1/events/departments/:departmentId', authMiddleware, requireRole(['ADMIN', 'DOCTOR', 'RECEPTION']), (req, res) => {
+    const departmentId = String(req.params.departmentId);
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
@@ -230,16 +251,22 @@ export const createHttpApp = (
     res.json({ token, expiresAt, departmentId: parsed.data.departmentId });
   });
 
-  app.post('/api/v1/auth/dev-token', (req, res) => {
-    const schema = z.object({ userId: z.string().min(2), role: z.enum(['ADMIN', 'DOCTOR', 'RECEPTION']) });
-    const parsed = schema.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: 'Invalid payload' });
-      return;
-    }
-    const token = signStaffToken({ sub: parsed.data.userId, role: parsed.data.role });
-    res.json({ token });
-  });
+  // NOTE: This endpoint mints privileged staff JWTs without prior authentication.
+  // It MUST NOT be exposed in production. Replace with real auth (OAuth/SSO) before go-live.
+  if (process.env.NODE_ENV !== 'production') {
+    app.post('/api/v1/auth/dev-token', (req, res) => {
+      const schema = z.object({ userId: z.string().min(2), role: z.enum(['ADMIN', 'DOCTOR', 'RECEPTION']) });
+      const parsed = schema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: 'Invalid payload' });
+        return;
+      }
+      const token = signStaffToken({ sub: parsed.data.userId, role: parsed.data.role });
+      res.json({ token });
+    });
+  } else {
+    app.post('/api/v1/auth/dev-token', (_req, res) => res.status(404).end());
+  }
 
   app.post('/api/v1/admin/reset', authMiddleware, requireRole(['ADMIN']), (_req, res) => {
     if (resetState) {
@@ -250,6 +277,38 @@ export const createHttpApp = (
 
   app.get('/api/v1/admin/departments', authMiddleware, requireRole(['ADMIN', 'RECEPTION', 'DOCTOR']), (_req, res) => {
     res.json(DEPARTMENT_REGISTRY);
+  });
+
+  app.post('/api/v1/admin/departments', authMiddleware, requireRole(['ADMIN']), (req, res) => {
+    const schema = z.object({
+      id: z.string().min(2).max(24),
+      name: z.string().min(2).max(120),
+      code: z.string().min(2).max(5),
+      color: z.string().min(2).max(64).optional(),
+    });
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid payload' });
+      return;
+    }
+
+    const id = parsed.data.id.trim().toUpperCase();
+    const code = parsed.data.code.trim().toUpperCase();
+    const exists = DEPARTMENT_REGISTRY.some((department) => department.id === id || department.code === code);
+    if (exists) {
+      res.status(409).json({ error: 'Department with this ID or code already exists' });
+      return;
+    }
+
+    const department: DepartmentRecord = {
+      id,
+      name: parsed.data.name.trim(),
+      code,
+      color: parsed.data.color ?? 'bg-dept-general',
+      isActive: true,
+    };
+    DEPARTMENT_REGISTRY.push(department);
+    res.status(201).json(department);
   });
 
   app.put('/api/v1/admin/departments/:departmentId', authMiddleware, requireRole(['ADMIN']), (req, res) => {

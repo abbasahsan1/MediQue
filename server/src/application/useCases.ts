@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { assertTransition } from '../domain/stateMachine.js';
 import { classifyPriority, type TriageRuleConfig } from '../domain/triage.js';
+import { VisitNotFoundError } from '../domain/errors.js';
 import type { AuditEvent, QueueSnapshot, Role, Visit, VisitState } from '../domain/models.js';
 import type {
   AuditRepository,
@@ -141,7 +142,7 @@ export class QueueUseCases {
   }): Promise<Visit> {
     const visit = await this.deps.visits.getById(input.visitId);
     if (!visit) {
-      throw new Error('Visit not found');
+      throw new VisitNotFoundError(input.visitId);
     }
     const before = { ...visit };
     assertTransition(visit.state, input.toState);

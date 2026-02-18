@@ -4,7 +4,8 @@ services:
       context: ./server
     container_name: medique-server
     env_file:
-      - ./server/.env.example
+      # Copy server/.env.example to server/.env and fill in real secrets before running
+      - ./server/.env
     ports:
       - "4000:4000"
     restart: unless-stopped

@@ -1,4 +1,5 @@
 import type { VisitState } from './models.js';
+import { InvalidTransitionError } from './errors.js';
 
 const ALLOWED: Record<VisitState, VisitState[]> = {
   SCANNED: ['WAITING'],
@@ -16,6 +17,6 @@ export const canTransition = (from: VisitState, to: VisitState): boolean => {
 
 export const assertTransition = (from: VisitState, to: VisitState): void => {
   if (!canTransition(from, to)) {
-    throw new Error(`Invalid transition: ${from} -> ${to}`);
+    throw new InvalidTransitionError(from, to);
   }
 };

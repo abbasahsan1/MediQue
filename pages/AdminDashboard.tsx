@@ -1,246 +1,521 @@
 import React, { useEffect, useState } from 'react';
-import { queueService } from '../services/queueService';
-import { generateQueueAnalysis } from '../services/geminiService';
+import { useNavigate } from 'react-router-dom';
+import { QRCodeSVG } from 'qrcode.react';
+import { queueService, DoctorRecord } from '../services/queueService';
 import { QueueStats, Department, DepartmentConfig } from '../types';
 import { DEPARTMENTS } from '../constants';
 import { QueueGraph } from '../components/QueueGraph';
-import { Sparkles, BarChart2, Users, Home, QrCode, CheckCircle, Building2, ToggleLeft, ToggleRight } from 'lucide-react';
+import {
+  BarChart2, Users, QrCode, CheckCircle, Building2,
+  ToggleLeft, ToggleRight, Clock, AlertTriangle,
+  ShieldCheck, Activity, LogOut, UserPlus, Trash2, Stethoscope,
+} from 'lucide-react';
 
 type ManagedDepartment = DepartmentConfig & { isActive: boolean };
 
-export const AdminDashboard: React.FC<{ onExit: () => void }> = ({ onExit }) => {
-  const [stats, setStats] = useState<Record<Department, QueueStats>>({} as Record<Department, QueueStats>);
-  const [aiReport, setAiReport] = useState<string>('');
-  const [loadingAi, setLoadingAi] = useState(false);
-  const [activeTab, setActiveTab] = useState<'overview' | 'qr' | 'departments'>('overview');
-  const [departments, setDepartments] = useState<ManagedDepartment[]>([]);
+const BASE_URL = import.meta.env.VITE_BASE_URL as string | undefined;
 
-  useEffect(() => {
-    const load = async () => {
-      const nextStats = await queueService.getAllStats();
-      setStats(nextStats);
-      const nextDepartments = await queueService.getManagedDepartments();
-      setDepartments(nextDepartments as ManagedDepartment[]);
-    };
+/* ── Admin Login Gate ─────────────────────────────── */
 
-    void load();
-    const interval = setInterval(() => {
-      void load();
-    }, 3000);
-    return () => clearInterval(interval);
-  }, []);
+function AdminLogin({ onSuccess }: { onSuccess: () => void }) {
+  const navigate = useNavigate();
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  const handleGenerateReport = async () => {
-    setLoadingAi(true);
-    setAiReport('');
-    const report = await generateQueueAnalysis(stats);
-    setAiReport(report);
-    setLoadingAi(false);
-  };
-
-  const totalWaiting = Object.values(stats).reduce((acc, stat) => acc + stat.waiting, 0);
-  const totalCompleted = Object.values(stats).reduce((acc, stat) => acc + stat.completed, 0);
-  const statsReady = Object.keys(stats).length > 0;
-
-  const toggleDepartment = async (department: ManagedDepartment) => {
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!password) return;
+    setError(null);
+    setLoading(true);
     try {
-      await queueService.updateDepartment(department.id as Department, { isActive: !department.isActive });
-      const nextDepartments = await queueService.getManagedDepartments();
-      setDepartments(nextDepartments as ManagedDepartment[]);
+      const ok = await queueService.adminLogin(password);
+      if (!ok) {
+        setError('Invalid admin password.');
+        setLoading(false);
+        return;
+      }
+      onSuccess();
     } catch {
-      alert('Failed to update department status.');
+      setError('Login failed.');
+      setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-100 via-white to-slate-200 p-8">
-      <div className="max-w-7xl mx-auto">
-        <div className="flex justify-between items-center mb-8">
+    <div className="min-h-screen bg-background flex flex-col">
+      <header className="border-b border-border px-6 py-4 flex items-center gap-2.5">
+        <button onClick={() => navigate('/')} className="flex items-center gap-2.5" type="button">
+          <div className="h-9 w-9 bg-primary text-primary-foreground rounded-md flex items-center justify-center">
+            <Activity size={18} />
+          </div>
+          <span className="text-lg font-bold text-foreground tracking-tight">MediQue</span>
+        </button>
+      </header>
+      <div className="flex-1 flex items-center justify-center p-6">
+        <div className="w-full max-w-sm">
+          <div className="flex flex-col items-center mb-8">
+            <div className="icon-circle icon-circle-muted mb-4" style={{ width: 56, height: 56 }}>
+              <ShieldCheck size={26} />
+            </div>
+            <h1 className="text-xl font-bold text-foreground">Admin Login</h1>
+            <p className="text-sm text-muted-foreground mt-1">Enter the admin password to continue.</p>
+          </div>
+          {error && (
+            <div className="alert alert-error mb-4">
+              <AlertTriangle size={14} /><span>{error}</span>
+            </div>
+          )}
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label htmlFor="admin-pass" className="block text-sm font-semibold text-foreground mb-1.5">Password</label>
+              <input
+                id="admin-pass"
+                type="password"
+                required
+                autoFocus
+                autoComplete="current-password"
+                placeholder="••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="input-field"
+              />
+            </div>
+            <button type="submit" disabled={loading || !password} className="btn-primary w-full justify-center py-3">
+              {loading ? 'Verifying…' : 'Login'}
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Admin Dashboard ──────────────────────────────── */
+
+export const AdminDashboard: React.FC = () => {
+  const navigate = useNavigate();
+  const [authed, setAuthed] = useState(() => queueService.isAdminAuthenticated());
+
+  if (!authed) {
+    return <AdminLogin onSuccess={() => setAuthed(true)} />;
+  }
+
+  return <AdminDashboardInner onLogout={() => {
+    queueService.adminLogout();
+    navigate('/', { replace: true });
+  }} />;
+};
+
+function AdminDashboardInner({ onLogout }: { onLogout: () => void }) {
+  const [stats, setStats] = useState<Record<Department, QueueStats>>({} as Record<Department, QueueStats>);
+  const [activeTab, setActiveTab] = useState<'overview' | 'qr' | 'departments' | 'doctors'>('overview');
+  const [departments, setDepartments] = useState<ManagedDepartment[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [deptError, setDeptError] = useState<string | null>(null);
+  const [newDepartment, setNewDepartment] = useState({ id: '', name: '', code: '' });
+  const [creatingDepartment, setCreatingDepartment] = useState(false);
+
+  // Doctor management state
+  const [doctors, setDoctors] = useState<DoctorRecord[]>([]);
+  const [doctorForm, setDoctorForm] = useState({ name: '', email: '', password: '', departmentId: '' });
+  const [doctorError, setDoctorError] = useState<string | null>(null);
+  const [creatingDoctor, setCreatingDoctor] = useState(false);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const nextStats = await queueService.getAllStats();
+        setStats(nextStats);
+        setLoadError(null);
+      } catch (err) {
+        setLoadError(err instanceof Error ? err.message : 'Failed to load stats');
+      }
+      try {
+        const nextDepts = await queueService.getManagedDepartments();
+        setDepartments(nextDepts as ManagedDepartment[]);
+      } catch {}
+    };
+    void load();
+    const iv = setInterval(() => { void load(); }, 5000);
+    return () => clearInterval(iv);
+  }, []);
+
+  // Load doctors when tab is active
+  useEffect(() => {
+    if (activeTab !== 'doctors') return;
+    const loadDoctors = async () => {
+      try {
+        const list = await queueService.listDoctors();
+        setDoctors(list);
+      } catch {}
+    };
+    void loadDoctors();
+  }, [activeTab]);
+
+  const toggleDepartment = async (department: ManagedDepartment) => {
+    setDeptError(null);
+    try {
+      await queueService.updateDepartment(department.id as Department, { isActive: !department.isActive });
+      const next = await queueService.getManagedDepartments();
+      setDepartments(next as ManagedDepartment[]);
+    } catch (err) {
+      setDeptError(err instanceof Error ? err.message : 'Failed to update department.');
+    }
+  };
+
+  const createDepartment = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setDeptError(null);
+    const id = newDepartment.id.trim().toUpperCase();
+    const name = newDepartment.name.trim();
+    const code = newDepartment.code.trim().toUpperCase();
+    if (!id || !name || !code) { setDeptError('All fields required.'); return; }
+    setCreatingDepartment(true);
+    try {
+      await queueService.createDepartment({ id, name, code, color: 'bg-dept-general' });
+      const next = await queueService.getManagedDepartments();
+      setDepartments(next as ManagedDepartment[]);
+      setNewDepartment({ id: '', name: '', code: '' });
+    } catch (err) {
+      setDeptError(err instanceof Error ? err.message : 'Failed to create department.');
+    } finally {
+      setCreatingDepartment(false);
+    }
+  };
+
+  const handleCreateDoctor = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setDoctorError(null);
+    if (!doctorForm.name.trim() || !doctorForm.email.trim() || !doctorForm.password || !doctorForm.departmentId) {
+      setDoctorError('All fields are required.');
+      return;
+    }
+    setCreatingDoctor(true);
+    try {
+      await queueService.createDoctorAccount(
+        doctorForm.name.trim(),
+        doctorForm.email.trim(),
+        doctorForm.password,
+        doctorForm.departmentId,
+      );
+      setDoctorForm({ name: '', email: '', password: '', departmentId: '' });
+      const list = await queueService.listDoctors();
+      setDoctors(list);
+    } catch (err) {
+      setDoctorError(err instanceof Error ? err.message : 'Failed to create doctor.');
+    } finally {
+      setCreatingDoctor(false);
+    }
+  };
+
+  const handleDeleteDoctor = async (id: string) => {
+    if (!window.confirm('Remove this doctor account?')) return;
+    try {
+      await queueService.deleteDoctor(id);
+      setDoctors((prev) => prev.filter((d) => d.id !== id));
+    } catch (err) {
+      setDoctorError(err instanceof Error ? err.message : 'Failed to delete doctor.');
+    }
+  };
+
+  const totalWaiting = Object.values(stats).reduce((acc, stat) => acc + stat.waiting, 0);
+  const totalCompleted = Object.values(stats).reduce((acc, stat) => acc + stat.completed, 0);
+  const totalActiveDepartments = departments.filter((d) => d.isActive).length;
+  const qrDepartments = departments.length > 0 ? departments : Object.values(DEPARTMENTS) as unknown as ManagedDepartment[];
+  const statsReady = Object.keys(stats).length > 0;
+
+  const TABS = [
+    { id: 'overview', label: 'Overview', icon: <BarChart2 size={14} /> },
+    { id: 'doctors', label: 'Doctors', icon: <Stethoscope size={14} /> },
+    { id: 'qr', label: 'QR Codes', icon: <QrCode size={14} /> },
+    { id: 'departments', label: 'Departments', icon: <Building2 size={14} /> },
+  ] as const;
+
+  const activeDepts = departments.filter((d) => d.isActive);
+
+  return (
+    <div className="min-h-screen bg-background flex flex-col">
+      <header className="border-b border-border px-5 py-3 flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <div className="h-9 w-9 bg-primary text-primary-foreground rounded-md flex items-center justify-center">
+            <Activity size={18} />
+          </div>
           <div>
-            <p className="text-xs uppercase tracking-[0.28em] text-slate-500 mb-2">Operations</p>
-            <h1 className="text-4xl font-black text-slate-900">Hospital Command Center</h1>
-            <p className="text-slate-600">Live Operational and Department Governance</p>
+            <span className="text-sm font-bold text-foreground">Admin Panel</span>
+            <p className="text-xs text-muted-foreground">MediQue Management</p>
           </div>
-          <button onClick={onExit} className="text-gray-600 hover:text-gray-900 flex items-center gap-2">
-            <Home size={20} /> Home
-          </button>
         </div>
+        <button onClick={onLogout} className="btn-ghost flex items-center gap-1.5 text-sm">
+          <LogOut size={14} /> Logout
+        </button>
+      </header>
 
-        {/* Tab Nav */}
-        <div className="flex space-x-1 bg-white p-1 rounded-2xl shadow-sm border border-slate-200 mb-8 w-fit">
-          <button 
-            onClick={() => setActiveTab('overview')}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === 'overview' ? 'bg-gray-100 text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
-          >
-            Overview
-          </button>
-          <button 
-             onClick={() => setActiveTab('qr')}
-             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${activeTab === 'qr' ? 'bg-gray-100 text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
-          >
-            <QrCode size={16} /> QR Codes
-          </button>
-          <button 
-             onClick={() => setActiveTab('departments')}
-             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${activeTab === 'departments' ? 'bg-gray-100 text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
-          >
-            <Building2 size={16} /> Departments
-          </button>
-        </div>
-
-        {activeTab === 'overview' ? (
-          <>
-            {!statsReady && (
-              <div className="bg-white p-6 rounded-xl border border-gray-200 text-gray-500 mb-6">
-                Loading live stats...
-              </div>
-            )}
-
-            {/* KPI Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-              <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 flex items-center gap-4">
-                <div className="p-3 bg-blue-100 text-blue-600 rounded-lg">
-                  <Users size={24} />
-                </div>
-                <div>
-                  <p className="text-sm text-gray-500 font-medium">Currently Waiting</p>
-                  <p className="text-3xl font-bold text-gray-900">{totalWaiting}</p>
-                </div>
-              </div>
-              
-              <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 flex items-center gap-4">
-                <div className="p-3 bg-green-100 text-green-600 rounded-lg">
-                  <CheckCircle size={24} />
-                </div>
-                <div>
-                  <p className="text-sm text-gray-500 font-medium">Total Served Today</p>
-                  <p className="text-3xl font-bold text-gray-900">{totalCompleted}</p>
-                </div>
-              </div>
-
-              <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 flex items-center gap-4">
-                <div className="p-3 bg-purple-100 text-purple-600 rounded-lg">
-                  <BarChart2 size={24} />
-                </div>
-                <div>
-                  <p className="text-sm text-gray-500 font-medium">Active Departments</p>
-                  <p className="text-3xl font-bold text-gray-900">{Object.keys(stats).length}</p>
-                </div>
+      <main className="flex-1 p-5 md:p-6">
+        <div className="max-w-6xl mx-auto space-y-6">
+          {/* Summary stats */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="stat-block">
+              <div className="icon-circle icon-circle-brand"><Users size={21} /></div>
+              <div>
+                <p className="text-2xl font-bold text-foreground">{totalWaiting}</p>
+                <p className="text-sm">Currently Waiting</p>
               </div>
             </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              
-              {/* Main Chart */}
-              <div className="lg:col-span-2">
-                  {statsReady && <QueueGraph stats={stats} />}
+            <div className="stat-block">
+              <div className="icon-circle icon-circle-success"><CheckCircle size={21} /></div>
+              <div>
+                <p className="text-2xl font-bold text-foreground">{totalCompleted}</p>
+                <p className="text-sm">Served Today</p>
               </div>
-
-              {/* AI Insights Panel */}
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
-                <div className="bg-gradient-to-r from-indigo-600 to-purple-600 p-6 text-white">
-                  <h3 className="font-bold text-lg flex items-center gap-2">
-                    <Sparkles size={20} className="text-yellow-300" /> AI Operations Analyst
-                  </h3>
-                  <p className="text-indigo-100 text-sm opacity-90">Get real-time insights on bottlenecks.</p>
-                </div>
-                <div className="p-6 flex-1 flex flex-col">
-                  {aiReport ? (
-                    <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 text-sm text-gray-700 leading-relaxed mb-4 flex-1 overflow-y-auto">
-                      {aiReport}
-                    </div>
-                  ) : (
-                    <div className="flex-1 flex items-center justify-center text-gray-400 text-sm text-center p-4">
-                      Click generate to analyze current queue data using Gemini AI.
-                    </div>
-                  )}
-                  
-                  <button
-                    onClick={handleGenerateReport}
-                    disabled={loadingAi}
-                    className={`w-full py-3 rounded-lg font-bold text-white transition-all ${
-                      loadingAi 
-                        ? 'bg-gray-400 cursor-not-allowed' 
-                        : 'bg-indigo-600 hover:bg-indigo-700 shadow-lg hover:shadow-xl'
-                    }`}
-                  >
-                    {loadingAi ? 'Analyzing Data...' : 'Generate AI Report'}
-                  </button>
-                </div>
+            </div>
+            <div className="stat-block">
+              <div className="icon-circle icon-circle-muted"><Building2 size={21} /></div>
+              <div>
+                <p className="text-2xl font-bold text-foreground">{totalActiveDepartments || Object.keys(stats).length}</p>
+                <p className="text-sm">Active Depts</p>
               </div>
-
             </div>
-
-            {/* Detailed Table */}
-            <div className="mt-8 bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-              <table className="w-full text-left">
-                <thead className="bg-gray-50 border-b border-gray-200">
-                  <tr>
-                    <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Department</th>
-                    <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Waiting</th>
-                    <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Avg Wait Time</th>
-                    <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Urgent Cases</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {statsReady && Object.entries(stats).map(([deptId, stat]) => (
-                    <tr key={deptId} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 text-sm font-medium text-gray-900 capitalize">
-                        {deptId.toLowerCase().replace('_', ' ')}
-                      </td>
-                      <td className="px-6 py-4 text-sm text-gray-600">{stat.waiting}</td>
-                      <td className="px-6 py-4 text-sm text-gray-600">
-                        <span className={`px-2 py-1 rounded text-xs font-bold ${stat.avgWaitTime > 20 ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>
-                          {stat.avgWaitTime} min
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-sm text-gray-600">{stat.urgentCount}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </>
-        ) : (
-          activeTab === 'qr' ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-fade-in">
-            {Object.values(DEPARTMENTS).map(dept => {
-               // In a real app, this URL would be the actual production URL + routing param
-               const dummyUrl = `https://mediqueue.app/checkin/${dept.id}`;
-               const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(dummyUrl)}`;
-               
-               return (
-                 <div key={dept.id} className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 flex flex-col items-center text-center">
-                    <div className={`w-full h-2 rounded-full ${dept.color} mb-4`}></div>
-                    <h3 className="text-xl font-bold text-gray-900 mb-2">{dept.name}</h3>
-                    <p className="text-sm text-gray-500 mb-6">Scan to enter queue</p>
-                    <div className="bg-gray-50 p-4 rounded-lg border border-gray-100 mb-4">
-                      <img src={qrUrl} alt={`${dept.name} QR Code`} className="w-40 h-40 mix-blend-multiply" />
-                    </div>
-                    <button 
-                      onClick={() => window.print()}
-                      className="text-sm text-blue-600 font-medium hover:text-blue-800"
-                    >
-                      Print Poster
-                    </button>
-                 </div>
-               );
-            })}
           </div>
-          ) : (
-            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-              <h3 className="text-lg font-bold text-slate-900 mb-1">Department Management</h3>
-              <p className="text-sm text-slate-500 mb-6">Enable or disable departments for patient check-in.</p>
-              <div className="space-y-3">
-                {departments.map((department) => (
-                  <div key={department.id} className="flex items-center justify-between border border-slate-200 rounded-xl p-4">
+
+          {/* Tabs */}
+          <div className="flex items-center gap-1 bg-surface border border-border rounded-lg p-1 w-fit">
+            {TABS.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id)}
+                className={`tab ${activeTab === tab.id ? 'active' : ''}`}
+              >
+                {tab.icon} {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {loadError && <div className="alert alert-error"><AlertTriangle size={15} />{loadError}</div>}
+
+          {/* Overview */}
+          {activeTab === 'overview' && (
+            <div className="space-y-6">
+              {!statsReady && <div className="card p-6">Loading live stats…</div>}
+              <div>{statsReady && <QueueGraph stats={stats} />}</div>
+              {statsReady && (
+                <div className="card overflow-hidden">
+                  <div className="px-6 py-4 border-b border-border"><h3>Department Breakdown</h3></div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                      <thead>
+                        <tr className="bg-surface-muted border-b border-border">
+                          {['Department', 'Waiting', 'Avg Wait', 'Completed'].map((h) => (
+                            <th key={h} className="px-6 py-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                        {Object.entries(stats).map(([deptId, stat]) => (
+                          <tr key={deptId}>
+                            <td className="px-6 py-4 text-sm font-semibold text-foreground">
+                              {DEPARTMENTS[deptId as Department]?.name ?? deptId}
+                            </td>
+                            <td className="px-6 py-4 text-sm text-secondary">{stat.waiting}</td>
+                            <td className="px-6 py-4">
+                              <span className={`badge ${stat.avgWaitTime > 20 ? 'badge-destructive' : 'badge-success'}`}>
+                                <Clock size={9} /> {stat.avgWaitTime}m
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 text-sm text-secondary">{stat.completed}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Doctors tab */}
+          {activeTab === 'doctors' && (
+            <div className="space-y-5">
+              <div className="card p-0 overflow-hidden">
+                <div className="px-6 py-5 border-b border-border">
+                  <h3>Create Doctor Account</h3>
+                  <p className="text-sm">Add a new doctor and assign them to a department.</p>
+                </div>
+                {doctorError && <div className="alert alert-error m-4"><AlertTriangle size={15} />{doctorError}</div>}
+                <form onSubmit={handleCreateDoctor} className="px-6 py-5 space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <p className="font-semibold text-slate-900">{department.name}</p>
-                      <p className="text-xs text-slate-500">Code: {department.code}</p>
+                      <label className="block text-sm font-semibold text-foreground mb-1.5">Full Name</label>
+                      <input
+                        value={doctorForm.name}
+                        onChange={(e) => setDoctorForm((p) => ({ ...p, name: e.target.value }))}
+                        className="input-field"
+                        placeholder="Dr. Ahmed"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-foreground mb-1.5">Email</label>
+                      <input
+                        type="email"
+                        value={doctorForm.email}
+                        onChange={(e) => setDoctorForm((p) => ({ ...p, email: e.target.value }))}
+                        className="input-field"
+                        placeholder="doctor@hospital.com"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-foreground mb-1.5">Password</label>
+                      <input
+                        type="password"
+                        value={doctorForm.password}
+                        onChange={(e) => setDoctorForm((p) => ({ ...p, password: e.target.value }))}
+                        className="input-field"
+                        placeholder="Set a password"
+                        required
+                        autoComplete="new-password"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-foreground mb-1.5">Department</label>
+                      <select
+                        value={doctorForm.departmentId}
+                        onChange={(e) => setDoctorForm((p) => ({ ...p, departmentId: e.target.value }))}
+                        className="input-field"
+                        required
+                      >
+                        <option value="">Select department</option>
+                        {activeDepts.map((d) => (
+                          <option key={d.id} value={d.id}>{d.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <button type="submit" disabled={creatingDoctor} className="btn-primary">
+                    <UserPlus size={14} /> {creatingDoctor ? 'Creating…' : 'Create Account'}
+                  </button>
+                </form>
+              </div>
+
+              <div className="card p-0 overflow-hidden">
+                <div className="px-6 py-4 border-b border-border">
+                  <h3>Registered Doctors</h3>
+                </div>
+                {doctors.length === 0 ? (
+                  <div className="px-6 py-8 text-center text-sm text-muted-foreground">No doctors registered yet.</div>
+                ) : (
+                  <div className="divide-y divide-border">
+                    {doctors.map((doc) => (
+                      <div key={doc.id} className="flex items-center justify-between px-6 py-4">
+                        <div>
+                          <p className="font-semibold text-foreground text-sm">{doc.name}</p>
+                          <p className="text-xs text-muted-foreground">{doc.email} · {doc.department_name}</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => void handleDeleteDoctor(doc.id)}
+                          className="btn-ghost text-destructive hover:bg-destructive/10 btn-sm"
+                          aria-label={`Delete ${doc.name}`}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* QR codes */}
+          {activeTab === 'qr' && (
+            <div className="space-y-4">
+              {!BASE_URL && (
+                <div className="alert alert-warn">
+                  <AlertTriangle size={15} />
+                  VITE_BASE_URL is not configured. QR codes will use the current origin as fallback.
+                </div>
+              )}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                {qrDepartments.map((dept) => {
+                  const origin = BASE_URL ?? window.location.origin;
+                  const checkinUrl = `${origin}/${dept.id.toLowerCase()}/newpatient`;
+                  return (
+                    <div key={dept.id} className="card p-6 flex flex-col items-center text-center">
+                      <div className={`w-full h-1 rounded-full ${dept.color} mb-5`} />
+                      <h3 className="text-base font-bold text-foreground mb-1">{dept.name}</h3>
+                      <p className="text-xs mb-5">Scan to enter queue</p>
+                      <div className="bg-white p-4 rounded-lg mb-4">
+                        <QRCodeSVG value={checkinUrl} size={160} level="M" />
+                      </div>
+                      <p className="text-xs text-muted-foreground mb-3 break-all max-w-[220px]">{checkinUrl}</p>
+                      <button type="button" onClick={() => window.print()} className="btn-outline btn-sm text-sm">
+                        Print Poster
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Departments */}
+          {activeTab === 'departments' && (
+            <div className="card p-0 overflow-hidden">
+              <div className="px-6 py-5 border-b border-border">
+                <h3>Department Management</h3>
+                <p className="text-sm">Create, enable, and disable departments.</p>
+              </div>
+              <form onSubmit={createDepartment} className="px-6 py-5 border-b border-border bg-surface-muted/40">
+                <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-3">Add Department</p>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                  <input
+                    value={newDepartment.id}
+                    onChange={(e) => setNewDepartment((p) => ({ ...p, id: e.target.value }))}
+                    className="input-field"
+                    placeholder="ID (e.g. PEDIATRICS)"
+                  />
+                  <input
+                    value={newDepartment.name}
+                    onChange={(e) => setNewDepartment((p) => ({ ...p, name: e.target.value }))}
+                    className="input-field md:col-span-2"
+                    placeholder="Department name"
+                  />
+                  <div className="flex gap-3">
+                    <input
+                      value={newDepartment.code}
+                      onChange={(e) => setNewDepartment((p) => ({ ...p, code: e.target.value }))}
+                      className="input-field"
+                      placeholder="Code"
+                      maxLength={5}
+                    />
+                    <button type="submit" className="btn-primary" disabled={creatingDepartment}>
+                      {creatingDepartment ? 'Adding…' : 'Add'}
+                    </button>
+                  </div>
+                </div>
+              </form>
+              {deptError && <div className="alert alert-error m-4"><AlertTriangle size={15} />{deptError}</div>}
+              <div className="divide-y divide-border">
+                {departments.map((department) => (
+                  <div key={department.id} className="flex items-center justify-between px-6 py-4">
+                    <div className="flex items-center gap-4">
+                      <div className={`w-2.5 h-2.5 rounded-full ${department.color}`} />
+                      <div>
+                        <p className="font-semibold text-foreground">{department.name}</p>
+                        <p className="text-xs">Code: {department.code}</p>
+                      </div>
                     </div>
                     <button
+                      type="button"
                       onClick={() => void toggleDepartment(department)}
-                      className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${department.isActive ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+                      className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-semibold border ${
+                        department.isActive
+                          ? 'border-success/50 bg-success/14 text-success'
+                          : 'border-border bg-surface-muted text-secondary'
+                      }`}
                     >
                       {department.isActive ? <ToggleRight size={16} /> : <ToggleLeft size={16} />}
                       {department.isActive ? 'Active' : 'Inactive'}
@@ -249,9 +524,9 @@ export const AdminDashboard: React.FC<{ onExit: () => void }> = ({ onExit }) => 
                 ))}
               </div>
             </div>
-          )
-        )}
-      </div>
+          )}
+        </div>
+      </main>
     </div>
   );
-};
+}

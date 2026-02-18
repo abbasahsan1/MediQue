@@ -9,8 +9,15 @@ export interface AuthClaims {
   departmentIds?: string[];
 }
 
-const jwtSecret = process.env.JWT_SECRET ?? 'dev-secret-change-me';
-const checkinSecret = process.env.CHECKIN_SECRET ?? 'dev-checkin-secret-change-me';
+const jwtSecret = process.env.JWT_SECRET;
+const checkinSecret = process.env.CHECKIN_SECRET;
+
+if (!jwtSecret || jwtSecret.length < 32) {
+  throw new Error('JWT_SECRET is missing or shorter than 32 characters; refusing to start');
+}
+if (!checkinSecret || checkinSecret.length < 32) {
+  throw new Error('CHECKIN_SECRET is missing or shorter than 32 characters; refusing to start');
+}
 
 export const signStaffToken = (claims: AuthClaims): string => {
   return jwt.sign(claims, jwtSecret, { algorithm: 'HS256', expiresIn: '1h' });
@@ -47,7 +54,10 @@ export const verifyCheckinToken = (token: string, departmentId: string): boolean
     .update(`${tokenDepartmentId}.${expiresAt}.${nonce}`)
     .digest('hex');
 
-  return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+  const sigBuf = Buffer.from(signature, 'utf8');
+  const expBuf = Buffer.from(expected, 'utf8');
+  if (sigBuf.length !== expBuf.length) return false;
+  return crypto.timingSafeEqual(sigBuf, expBuf);
 };
 
 export const correlationIdMiddleware = (
