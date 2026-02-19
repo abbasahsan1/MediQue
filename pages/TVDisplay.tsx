@@ -68,11 +68,11 @@ export const TVDisplay: React.FC<{ onExit: () => void }> = ({ onExit }) => {
     >
       <header className="border-b border-border px-5 md:px-8 py-5 flex items-center justify-between" role="banner">
         <div className="flex items-center gap-4">
-          <div className="h-10 w-10 bg-primary text-primary-foreground rounded-md flex items-center justify-center">
-            <Activity size={20} aria-hidden="true" />
+          <div className="h-10 w-10 bg-primary text-primary-foreground rounded-md flex items-center justify-center font-bold text-xl">
+            G
           </div>
           <div>
-            <h1 className="text-lg font-semibold tracking-wide">MediQue</h1>
+            <h1 className="text-lg font-semibold tracking-wide">Gravity</h1>
             <p className="text-xs uppercase tracking-widest">Queue Status Board</p>
           </div>
         </div>

@@ -63,7 +63,7 @@ export const createHttpApp = (
   app.use(rateLimiter());
 
   app.get('/health', (_req, res) => {
-    res.json({ status: 'ok', service: 'medique-server', timestamp: Date.now() });
+    res.json({ status: 'ok', service: 'gravity-server', timestamp: Date.now() });
   });
 
   app.post('/api/v1/patient/checkin', async (req: Request, res) => {

@@ -77,7 +77,7 @@ export function AppSidebar({
                 <Activity className="size-4" />
               </div>
               <div className="grid flex-1 text-left text-sm leading-tight">
-                <span className="truncate font-semibold text-sidebar-foreground">MediQue</span>
+                <span className="truncate font-semibold text-sidebar-foreground">Gravity</span>
                 <span className="truncate text-xs text-sidebar-foreground/65">Queue Management</span>
               </div>
             </SidebarMenuButton>

@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Mic, MicOff, AlertCircle } from 'lucide-react';
 import { useVoiceInput } from '../hooks/useVoiceInput';
 
@@ -19,16 +19,25 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({
 }) => {
   const { transcript, isListening, isSupported, error, startListening, stopListening, resetTranscript } = useVoiceInput();
 
+  // Stable ref for onChange to avoid re-syncing when the callback reference changes
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+
+  // Track the last transcript we synced so we only push genuinely new transcripts
+  const lastSyncedRef = useRef('');
+
   useEffect(() => {
-    if (transcript) {
-      onChange(transcript);
+    if (transcript && transcript !== lastSyncedRef.current) {
+      lastSyncedRef.current = transcript;
+      onChangeRef.current(transcript);
     }
-  }, [transcript, onChange]);
+  }, [transcript]);
 
   const handleToggle = () => {
     if (isListening) {
       stopListening();
     } else {
+      lastSyncedRef.current = '';
       resetTranscript();
       startListening();
     }
@@ -79,7 +88,16 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({
       )}
 
       {isListening && (
-        <p className="text-xs text-primary mt-1 animate-pulse">Listening... speak now</p>
+        <div className="flex items-center gap-2 mt-2">
+          <div className="voice-bars">
+            <div className="voice-bar" />
+            <div className="voice-bar" />
+            <div className="voice-bar" />
+            <div className="voice-bar" />
+            <div className="voice-bar" />
+          </div>
+          <span className="text-xs text-primary">Listening... speak now</span>
+        </div>
       )}
     </div>
   );

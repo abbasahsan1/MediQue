@@ -1,6 +1,6 @@
 import { Department, DepartmentConfig } from './types';
 
-export const APP_NAME = "MediQueue";
+export const APP_NAME = "Gravity";
 
 export const DEPARTMENTS: Record<string, DepartmentConfig> = {
   [Department.GENERAL]: { id: Department.GENERAL, name: 'General Medicine', code: 'GM', color: 'bg-dept-general' },

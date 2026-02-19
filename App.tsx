@@ -1,14 +1,36 @@
 import { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 
-const LandingPage = lazy(() => import('./pages/LandingPage').then(m => ({ default: m.LandingPage })));
-const DoctorLogin = lazy(() => import('./pages/DoctorLogin').then(m => ({ default: m.DoctorLogin })));
-const DoctorDashboard = lazy(() => import('./pages/DoctorDashboard').then(m => ({ default: m.DoctorDashboard })));
-const AdminDashboard = lazy(() => import('./pages/AdminDashboard').then(m => ({ default: m.AdminDashboard })));
-const PatientIntake = lazy(() => import('./pages/PatientIntake').then(m => ({ default: m.PatientIntake })));
-const PatientView = lazy(() => import('./pages/PatientView').then(m => ({ default: m.PatientView })));
-const TVDisplay = lazy(() => import('./pages/TVDisplay').then(m => ({ default: m.TVDisplay })));
-const ReceptionView = lazy(() => import('./pages/ReceptionView').then(m => ({ default: m.ReceptionView })));
+/**
+ * Retry wrapper for lazy imports — handles stale chunk errors after deployment.
+ * If a dynamic import fails (e.g. chunk hash changed), reload the page once
+ * to get the latest index.html with correct chunk references.
+ */
+function lazyWithRetry<T extends React.ComponentType<any>>(
+  factory: () => Promise<{ default: T }>,
+) {
+  return lazy(() =>
+    factory().catch((err: unknown) => {
+      const alreadyRetried = sessionStorage.getItem('chunk_retry');
+      if (!alreadyRetried) {
+        sessionStorage.setItem('chunk_retry', '1');
+        window.location.reload();
+        return new Promise<never>(() => {});
+      }
+      sessionStorage.removeItem('chunk_retry');
+      throw err;
+    }),
+  );
+}
+
+const LandingPage = lazyWithRetry(() => import('./pages/LandingPage').then(m => ({ default: m.LandingPage })));
+const DoctorLogin = lazyWithRetry(() => import('./pages/DoctorLogin').then(m => ({ default: m.DoctorLogin })));
+const DoctorDashboard = lazyWithRetry(() => import('./pages/DoctorDashboard').then(m => ({ default: m.DoctorDashboard })));
+const AdminDashboard = lazyWithRetry(() => import('./pages/AdminDashboard').then(m => ({ default: m.AdminDashboard })));
+const PatientIntake = lazyWithRetry(() => import('./pages/PatientIntake').then(m => ({ default: m.PatientIntake })));
+const PatientView = lazyWithRetry(() => import('./pages/PatientView').then(m => ({ default: m.PatientView })));
+const TVDisplay = lazyWithRetry(() => import('./pages/TVDisplay').then(m => ({ default: m.TVDisplay })));
+const ReceptionView = lazyWithRetry(() => import('./pages/ReceptionView').then(m => ({ default: m.ReceptionView })));
 
 function LazyFallback() {
   return (

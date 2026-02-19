@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { queueService } from '../services/queueService';
 import { Activity, Stethoscope, AlertTriangle } from 'lucide-react';
@@ -11,11 +11,12 @@ export const DoctorLogin: React.FC = () => {
   const [loading, setLoading] = useState(false);
 
   // Redirect if already logged in
-  const existing = queueService.getDoctorSession();
-  if (existing) {
-    navigate('/doctor/dashboard', { replace: true });
-    return null;
-  }
+  useEffect(() => {
+    const existing = queueService.getDoctorSession();
+    if (existing) {
+      navigate('/doctor/dashboard', { replace: true });
+    }
+  }, [navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -40,10 +41,10 @@ export const DoctorLogin: React.FC = () => {
     <div className="min-h-screen bg-background flex flex-col">
       <header className="border-b border-border px-6 py-4 flex items-center gap-2.5">
         <button onClick={() => navigate('/')} className="flex items-center gap-2.5" type="button">
-          <div className="h-9 w-9 bg-primary text-primary-foreground rounded-md flex items-center justify-center">
-            <Activity size={18} />
+          <div className="h-9 w-9 bg-primary text-primary-foreground rounded-md flex items-center justify-center font-bold text-lg">
+            G
           </div>
-          <span className="text-lg font-bold text-foreground tracking-tight">MediQue</span>
+          <span className="text-lg font-bold text-foreground tracking-tight">Gravity</span>
         </button>
       </header>
 

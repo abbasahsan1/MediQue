@@ -123,8 +123,8 @@ export const DoctorDashboard: React.FC = () => {
       {/* Header */}
       <header className="border-b border-border px-5 py-3 flex items-center gap-3 flex-wrap">
         <div className="flex items-center gap-2.5">
-          <div className="h-9 w-9 bg-primary text-primary-foreground rounded-md flex items-center justify-center">
-            <Activity size={18} />
+          <div className="h-9 w-9 bg-primary text-primary-foreground rounded-md flex items-center justify-center font-bold text-lg">
+            G
           </div>
           <div>
             <p className="text-sm font-bold text-foreground leading-tight">{doctorName}</p>

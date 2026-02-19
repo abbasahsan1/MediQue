@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 type ThemeMode = 'light' | 'dark';
 
-const THEME_KEY = 'medique_theme';
+const THEME_KEY = 'gravity_theme';
 
 const resolveInitialTheme = (): ThemeMode => {
   if (typeof window === 'undefined') return 'light';

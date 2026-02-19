@@ -1,5 +1,5 @@
 {
-  "name": "MediQueue - Smart Hospital QMS",
+  "name": "Gravity - Smart Hospital QMS",
   "description": "A serverless, BYOD-enabled hospital queue management system. Features patient self-check-in, real-time status tracking, doctor dashboards, and AI-powered operational insights.",
   "requestFramePermissions": [
     "geolocation"

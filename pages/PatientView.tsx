@@ -115,10 +115,10 @@ export const PatientView: React.FC = () => {
     <div className="min-h-screen bg-background flex flex-col">
       <header className="page-header px-5 py-4 flex items-center justify-between" role="banner">
         <div className="flex items-center gap-2">
-          <div className="icon-circle icon-circle-brand" style={{ width: 30, height: 30 }}>
-            <Activity size={14} />
+          <div className="h-[30px] w-[30px] bg-primary text-primary-foreground rounded-md flex items-center justify-center font-bold text-sm">
+            G
           </div>
-          <span className="font-semibold text-foreground text-sm">MediQue</span>
+          <span className="font-semibold text-foreground text-sm">Gravity</span>
         </div>
       </header>
 

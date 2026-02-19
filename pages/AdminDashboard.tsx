@@ -46,10 +46,10 @@ function AdminLogin({ onSuccess }: { onSuccess: () => void }) {
     <div className="min-h-screen bg-background flex flex-col">
       <header className="border-b border-border px-6 py-4 flex items-center gap-2.5">
         <button onClick={() => navigate('/')} className="flex items-center gap-2.5" type="button">
-          <div className="h-9 w-9 bg-primary text-primary-foreground rounded-md flex items-center justify-center">
-            <Activity size={18} />
+          <div className="h-9 w-9 bg-primary text-primary-foreground rounded-md flex items-center justify-center font-bold text-lg">
+            G
           </div>
-          <span className="text-lg font-bold text-foreground tracking-tight">MediQue</span>
+          <span className="text-lg font-bold text-foreground tracking-tight">Gravity</span>
         </button>
       </header>
       <div className="flex-1 flex items-center justify-center p-6">
@@ -238,12 +238,12 @@ function AdminDashboardInner({ onLogout }: { onLogout: () => void }) {
     <div className="min-h-screen bg-background flex flex-col">
       <header className="border-b border-border px-5 py-3 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <div className="h-9 w-9 bg-primary text-primary-foreground rounded-md flex items-center justify-center">
-            <Activity size={18} />
+          <div className="h-9 w-9 bg-primary text-primary-foreground rounded-md flex items-center justify-center font-bold text-lg">
+            G
           </div>
           <div>
             <span className="text-sm font-bold text-foreground">Admin Panel</span>
-            <p className="text-xs text-muted-foreground">MediQue Management</p>
+            <p className="text-xs text-muted-foreground">Gravity Management</p>
           </div>
         </div>
         <button onClick={onLogout} className="btn-ghost flex items-center gap-1.5 text-sm">
