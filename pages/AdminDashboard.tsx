@@ -260,6 +260,77 @@ function AdminDashboardInner({ onLogout }: { onLogout: () => void }) {
     }
   };
 
+  const handlePrintSinglePoster = ({
+    title,
+    subtitle,
+    url,
+    qrElementId,
+  }: {
+    title: string;
+    subtitle: string;
+    url: string;
+    qrElementId: string;
+  }) => {
+    const qrHost = document.getElementById(qrElementId);
+    const qrSvg = qrHost?.querySelector('svg');
+    if (!qrSvg) {
+      setLoadError('Could not prepare poster for printing. Please try again.');
+      return;
+    }
+
+    const safeText = (value: string) => value
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;');
+
+    const popup = window.open('', '_blank', 'width=900,height=1200');
+    if (!popup) {
+      setLoadError('Popup blocked. Please allow popups and try again.');
+      return;
+    }
+
+    const qrMarkup = qrSvg.outerHTML;
+    popup.document.write(`
+      <html>
+        <head>
+          <title>Gravity Poster</title>
+          <style>
+            @page { size: A4 portrait; margin: 18mm; }
+            body { font-family: Inter, Arial, sans-serif; margin: 0; color: #111827; }
+            .poster { border: 2px solid #e5e7eb; border-radius: 16px; padding: 28px; display: flex; flex-direction: column; align-items: center; text-align: center; }
+            .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+            .logo { width: 34px; height: 34px; border-radius: 8px; background: #2563eb; color: white; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+            .title { font-size: 28px; font-weight: 800; margin: 8px 0 4px; }
+            .subtitle { font-size: 16px; color: #4b5563; margin: 0 0 20px; }
+            .qr { background: white; padding: 18px; border-radius: 12px; border: 1px solid #e5e7eb; margin-bottom: 16px; }
+            .url { font-size: 12px; color: #6b7280; word-break: break-all; margin-bottom: 16px; }
+            .note { font-size: 14px; color: #374151; }
+          </style>
+        </head>
+        <body>
+          <div class="poster">
+            <div class="brand">
+              <div class="logo">G</div>
+              <div><strong>Gravity</strong> Queue Management</div>
+            </div>
+            <h1 class="title">${safeText(title)}</h1>
+            <p class="subtitle">${safeText(subtitle)}</p>
+            <div class="qr">${qrMarkup}</div>
+            <div class="url">${safeText(url)}</div>
+            <p class="note">Scan this QR code to start patient check-in.</p>
+          </div>
+          <script>
+            window.onload = () => {
+              window.print();
+              setTimeout(() => window.close(), 200);
+            };
+          </script>
+        </body>
+      </html>
+    `);
+    popup.document.close();
+  };
+
   const totalWaiting = Object.values(stats).reduce((acc, stat) => acc + stat.waiting, 0);
   const totalCompleted = Object.values(stats).reduce((acc, stat) => acc + stat.completed, 0);
   const totalActiveDepartments = departments.filter((d) => d.isActive).length;
@@ -548,11 +619,20 @@ function AdminDashboardInner({ onLogout }: { onLogout: () => void }) {
                       <div className={`w-full h-1 rounded-full ${dept.color} mb-5`} />
                       <h3 className="text-base font-bold text-foreground mb-1">{dept.name}</h3>
                       <p className="text-xs mb-5">Scan to enter queue</p>
-                      <div className="bg-white p-4 rounded-lg mb-4">
+                      <div id={`dept-qr-${dept.id}`} className="bg-white p-4 rounded-lg mb-4">
                         <QRCodeSVG value={checkinUrl} size={160} level="M" />
                       </div>
                       <p className="text-xs text-muted-foreground mb-3 break-all max-w-[220px]">{checkinUrl}</p>
-                      <button type="button" onClick={() => window.print()} className="btn-outline btn-sm text-sm">
+                      <button
+                        type="button"
+                        onClick={() => handlePrintSinglePoster({
+                          title: dept.name,
+                          subtitle: 'Department Queue Check-In',
+                          url: checkinUrl,
+                          qrElementId: `dept-qr-${dept.id}`,
+                        })}
+                        className="btn-outline btn-sm text-sm"
+                      >
                         Print Poster
                       </button>
                     </div>
@@ -579,11 +659,20 @@ function AdminDashboardInner({ onLogout }: { onLogout: () => void }) {
                         <h3 className="text-base font-bold text-foreground mb-1">Dr. {doctor.name}</h3>
                         <p className="text-xs mb-1">{doctor.department_name}</p>
                         <p className="text-xs mb-5">Scan to assign directly</p>
-                        <div className="bg-white p-4 rounded-lg mb-4">
+                        <div id={`doctor-qr-${doctor.id}`} className="bg-white p-4 rounded-lg mb-4">
                           <QRCodeSVG value={checkinUrl} size={160} level="M" />
                         </div>
                         <p className="text-xs text-muted-foreground mb-3 break-all max-w-[220px]">{checkinUrl}</p>
-                        <button type="button" onClick={() => window.print()} className="btn-outline btn-sm text-sm">
+                        <button
+                          type="button"
+                          onClick={() => handlePrintSinglePoster({
+                            title: `Dr. ${doctor.name}`,
+                            subtitle: `${doctor.department_name} • Direct Assignment`,
+                            url: checkinUrl,
+                            qrElementId: `doctor-qr-${doctor.id}`,
+                          })}
+                          className="btn-outline btn-sm text-sm"
+                        >
                           Print Poster
                         </button>
                       </div>
