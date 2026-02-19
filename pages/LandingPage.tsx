@@ -1,12 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
+import { queueService, LandingStats } from '../services/queueService';
 import {
   ArrowRight, CheckCircle2, Mic, ShieldCheck, Activity,
   Menu, X, Clock, FileWarning, ClipboardX, Users, Scan, FileText,
   Shield, Lock, Cloud, FileKey, Database, Zap, Globe, Stethoscope,
-  Server, Cpu, Code2, ChevronDown,
+  ChevronDown,
 } from 'lucide-react';
+
+const CONTACT_EMAIL = 'contact@gravityhealth.app';
 
 /* ── Navbar ──────────────────────────────────────────── */
 
@@ -46,7 +49,7 @@ function Navbar() {
         <div className="hidden md:flex items-center gap-4">
           <button onClick={() => navigate('/doctor/login')} className="text-sm font-medium text-slate-600 hover:text-blue-600 transition-colors" type="button">Doctor Login</button>
           <button onClick={() => navigate('/admin')} className="text-sm font-medium text-slate-600 hover:text-blue-600 transition-colors" type="button">Admin</button>
-          <button onClick={() => navigate('/general/newpatient')} className="bg-blue-600 text-white px-6 py-2 rounded-full text-sm font-semibold hover:bg-blue-700 transition-colors shadow-lg shadow-blue-600/20" type="button">Join Queue</button>
+          <a href={`mailto:${CONTACT_EMAIL}`} className="bg-blue-600 text-white px-6 py-2 rounded-full text-sm font-semibold hover:bg-blue-700 transition-colors shadow-lg shadow-blue-600/20">Contact Us</a>
         </div>
 
         <button className="md:hidden p-2 text-slate-600 hover:text-slate-900 bg-slate-100 rounded-full" onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} type="button">
@@ -61,7 +64,7 @@ function Navbar() {
             <a href="#how-it-works" className="text-slate-600 hover:text-blue-600 py-2" onClick={() => setIsMobileMenuOpen(false)}>How it Works</a>
             <a href="#trust" className="text-slate-600 hover:text-blue-600 py-2" onClick={() => setIsMobileMenuOpen(false)}>Security</a>
             <button onClick={() => { setIsMobileMenuOpen(false); navigate('/doctor/login'); }} className="text-slate-600 hover:text-blue-600 py-2 text-left" type="button">Doctor Login</button>
-            <button onClick={() => { setIsMobileMenuOpen(false); navigate('/general/newpatient'); }} className="w-full bg-blue-600 text-white py-2.5 rounded-xl text-sm font-semibold" type="button">Join Queue</button>
+            <a href={`mailto:${CONTACT_EMAIL}`} className="w-full bg-blue-600 text-white py-2.5 rounded-xl text-sm font-semibold text-center">Contact Us</a>
           </div>
         </div>
       )}
@@ -103,12 +106,11 @@ function Hero() {
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.3 }}
               className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-12"
             >
-              <button onClick={() => navigate('/general/newpatient')}
+              <a href={`mailto:${CONTACT_EMAIL}`}
                 className="h-14 px-8 text-base shadow-lg shadow-blue-600/20 w-full sm:w-auto rounded-full bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
-                type="button"
               >
-                Join a Queue <ArrowRight className="w-5 h-5" />
-              </button>
+                Contact Us <ArrowRight className="w-5 h-5" />
+              </a>
               <button onClick={() => navigate('/doctor/login')}
                 className="h-14 px-8 text-base w-full sm:w-auto rounded-full bg-white text-slate-700 font-semibold border border-slate-200 hover:bg-slate-50 transition-colors flex items-center justify-center gap-2"
                 type="button"
@@ -402,40 +404,55 @@ function TrustSection() {
   );
 }
 
-/* ── Technical ────────────────────────────────────────── */
+/* ── Stats ───────────────────────────────────────────── */
 
-function TechnicalSection() {
+function StatsSection() {
+  const [stats, setStats] = useState<LandingStats>({
+    patientsHandled: 0,
+    completedToday: 0,
+    avgWaitMinutes: 0,
+    urgentToday: 0,
+  });
+
+  useEffect(() => {
+    const loadStats = async () => {
+      try {
+        const next = await queueService.getLandingStats();
+        setStats(next);
+      } catch {
+        // Keep fallback values if DB stats cannot be loaded.
+      }
+    };
+    void loadStats();
+  }, []);
+
+  const avgTimeSaved = Math.max(0, 45 - stats.avgWaitMinutes);
+  const cards = [
+    { label: 'Patients Handled', value: stats.patientsHandled.toLocaleString(), note: 'All-time from DB archives + today' },
+    { label: 'Completed Today', value: stats.completedToday.toLocaleString(), note: 'Completed consultations today' },
+    { label: 'Avg Time Saved', value: `${avgTimeSaved} min`, note: 'Compared to 45 minute baseline' },
+    { label: 'Urgent Cases Today', value: stats.urgentToday.toLocaleString(), note: 'Urgency triaged from DB visits' },
+  ];
+
   return (
     <section className="py-20 border-t border-slate-100 bg-white">
       <div className="container mx-auto px-6">
         <div className="text-center mb-12">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 border border-blue-100 text-blue-700 text-sm font-medium mb-6">
             <span className="flex h-2 w-2 rounded-full bg-blue-600 animate-pulse" />
-            Tech Stack
+            Live Performance
           </div>
-          <h2 className="text-2xl font-bold text-slate-900">Built with Modern, Reliable Technology</h2>
+          <h2 className="text-2xl font-bold text-slate-900">Hospital Impact Metrics</h2>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
-          <div className="flex flex-col items-center text-center p-4">
-            <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center mb-4"><Cpu className="w-6 h-6" /></div>
-            <h3 className="font-semibold text-slate-900 mb-1">Deepgram AI</h3>
-            <p className="text-sm text-slate-500">Voice-to-text transcription for hands-free patient intake.</p>
-          </div>
-          <div className="flex flex-col items-center text-center p-4">
-            <div className="w-12 h-12 bg-cyan-50 text-cyan-600 rounded-xl flex items-center justify-center mb-4"><Database className="w-6 h-6" /></div>
-            <h3 className="font-semibold text-slate-900 mb-1">Supabase</h3>
-            <p className="text-sm text-slate-500">PostgreSQL backend with real-time subscriptions and RLS.</p>
-          </div>
-          <div className="flex flex-col items-center text-center p-4">
-            <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center mb-4"><Server className="w-6 h-6" /></div>
-            <h3 className="font-semibold text-slate-900 mb-1">Vercel Edge</h3>
-            <p className="text-sm text-slate-500">Global CDN deployment with instant page loads.</p>
-          </div>
-          <div className="flex flex-col items-center text-center p-4">
-            <div className="w-12 h-12 bg-slate-50 text-slate-600 rounded-xl flex items-center justify-center mb-4"><Code2 className="w-6 h-6" /></div>
-            <h3 className="font-semibold text-slate-900 mb-1">React + TypeScript</h3>
-            <p className="text-sm text-slate-500">Type-safe, component-driven frontend architecture.</p>
-          </div>
+          {cards.map((card) => (
+            <div key={card.label} className="flex flex-col items-center text-center p-4">
+              <div className="w-12 h-12 bg-cyan-50 text-cyan-600 rounded-xl flex items-center justify-center mb-4"><Database className="w-6 h-6" /></div>
+              <h3 className="font-semibold text-slate-900 mb-1">{card.label}</h3>
+              <p className="text-2xl font-bold text-slate-900 mb-1">{card.value}</p>
+              <p className="text-sm text-slate-500">{card.note}</p>
+            </div>
+          ))}
         </div>
       </div>
     </section>
@@ -497,9 +514,9 @@ function FinalCTA() {
         <h2 className="text-3xl md:text-5xl font-bold text-white mb-6">Ready to Eliminate Hospital Queues?</h2>
         <p className="text-xl text-blue-100 mb-10 max-w-2xl mx-auto">Whether you are a patient or a healthcare provider, Gravity makes the queue experience instant and seamless.</p>
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-          <button onClick={() => navigate('/general/newpatient')} className="h-14 px-8 text-lg w-full sm:w-auto bg-white text-blue-700 font-semibold rounded-full hover:bg-blue-50 transition-colors flex items-center justify-center gap-2" type="button">
-            Join Queue <ArrowRight className="w-5 h-5" />
-          </button>
+          <a href={`mailto:${CONTACT_EMAIL}`} className="h-14 px-8 text-lg w-full sm:w-auto bg-white text-blue-700 font-semibold rounded-full hover:bg-blue-50 transition-colors flex items-center justify-center gap-2">
+            Contact Us <ArrowRight className="w-5 h-5" />
+          </a>
           <button onClick={() => navigate('/doctor/login')} className="h-14 px-8 text-lg w-full sm:w-auto bg-blue-700 text-white font-semibold rounded-full hover:bg-blue-800 transition-colors flex items-center justify-center gap-2" type="button">
             Doctor Dashboard
           </button>
@@ -527,7 +544,7 @@ function LandingFooter() {
           <div>
             <h4 className="font-semibold text-slate-900 mb-4">For Patients</h4>
             <ul className="space-y-3 text-sm text-slate-600">
-              <li><button onClick={() => navigate('/general/newpatient')} className="hover:text-blue-600 transition-colors" type="button">Join Queue</button></li>
+              <li><a href={`mailto:${CONTACT_EMAIL}`} className="hover:text-blue-600 transition-colors">Contact Us</a></li>
               <li><button onClick={() => navigate('/tv')} className="hover:text-blue-600 transition-colors" type="button">Queue Display</button></li>
             </ul>
           </div>
@@ -564,7 +581,7 @@ export const LandingPage: React.FC = () => {
       <SolutionSection />
       <FeaturesSection />
       <TrustSection />
-      <TechnicalSection />
+      <StatsSection />
       <FAQSection />
       <FinalCTA />
       <LandingFooter />

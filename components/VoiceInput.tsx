@@ -87,6 +87,25 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({
 
   return (
     <div className="relative">
+      {isListening && (
+        <div className="mb-3 rounded-lg border border-primary/35 bg-primary/10 p-4">
+          <div className="flex items-center justify-center mb-3">
+            <div className="relative h-14 w-14 rounded-full bg-primary text-primary-foreground flex items-center justify-center">
+              <div className="absolute inset-0 rounded-full bg-primary/20 animate-ping" />
+              <Mic size={24} className="relative z-10" />
+            </div>
+          </div>
+          <div className="voice-bars justify-center h-8 mb-1">
+            <div className="voice-bar !w-1 !h-5" />
+            <div className="voice-bar !w-1 !h-5" />
+            <div className="voice-bar !w-1 !h-5" />
+            <div className="voice-bar !w-1 !h-5" />
+            <div className="voice-bar !w-1 !h-5" />
+          </div>
+          <p className="text-xs text-primary text-center font-semibold">Listening... speak now</p>
+        </div>
+      )}
+
       {multiline ? (
         <textarea
           value={value}
@@ -125,25 +144,6 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({
         <p className="flex items-center gap-1 text-xs text-destructive mt-1">
           <AlertCircle size={11} /> {error}
         </p>
-      )}
-
-      {isListening && (
-        <div className="mt-3 rounded-lg border border-primary/35 bg-primary/10 p-4">
-          <div className="flex items-center justify-center mb-3">
-            <div className="relative h-14 w-14 rounded-full bg-primary text-primary-foreground flex items-center justify-center">
-              <div className="absolute inset-0 rounded-full bg-primary/20 animate-ping" />
-              <Mic size={24} className="relative z-10" />
-            </div>
-          </div>
-          <div className="voice-bars justify-center h-8 mb-1">
-            <div className="voice-bar !w-1 !h-5" />
-            <div className="voice-bar !w-1 !h-5" />
-            <div className="voice-bar !w-1 !h-5" />
-            <div className="voice-bar !w-1 !h-5" />
-            <div className="voice-bar !w-1 !h-5" />
-          </div>
-          <p className="text-xs text-primary text-center font-semibold">Listening... speak now</p>
-        </div>
       )}
     </div>
   );

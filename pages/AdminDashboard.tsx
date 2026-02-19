@@ -1,14 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
-import { queueService, DoctorRecord } from '../services/queueService';
+import { queueService, DoctorRecord, DailyExportRecord } from '../services/queueService';
 import { QueueStats, Department, DepartmentConfig } from '../types';
 import { DEPARTMENTS } from '../constants';
 import { QueueGraph } from '../components/QueueGraph';
 import {
   BarChart2, Users, QrCode, CheckCircle, Building2,
   ToggleLeft, ToggleRight, Clock, AlertTriangle,
-  ShieldCheck, Activity, LogOut, UserPlus, Trash2, Stethoscope,
+  ShieldCheck, Activity, LogOut, UserPlus, Trash2, Stethoscope, Download,
 } from 'lucide-react';
 
 type ManagedDepartment = DepartmentConfig & { isActive: boolean };
@@ -121,6 +121,11 @@ function AdminDashboardInner({ onLogout }: { onLogout: () => void }) {
   const [doctorForm, setDoctorForm] = useState({ name: '', email: '', password: '', departmentId: '' });
   const [doctorError, setDoctorError] = useState<string | null>(null);
   const [creatingDoctor, setCreatingDoctor] = useState(false);
+  const [isEndingDay, setIsEndingDay] = useState(false);
+  const [endDayMessage, setEndDayMessage] = useState<string | null>(null);
+  const [showPrevious, setShowPrevious] = useState(false);
+  const [previousExports, setPreviousExports] = useState<DailyExportRecord[]>([]);
+  const [loadingPrevious, setLoadingPrevious] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -219,6 +224,42 @@ function AdminDashboardInner({ onLogout }: { onLogout: () => void }) {
     }
   };
 
+  const handleEndDay = async () => {
+    const confirmed = window.confirm('End day now? This will export today\'s queue data to CSV and clear all queue data from the system.');
+    if (!confirmed) return;
+
+    setEndDayMessage(null);
+    setLoadError(null);
+    setIsEndingDay(true);
+    try {
+      const exportedRows = await queueService.endDayAndExportCsv();
+      await queueService.refreshAllDepartments();
+      const nextStats = await queueService.getAllStats();
+      setStats(nextStats);
+      setEndDayMessage(`End day complete. Exported ${exportedRows} records and cleared queues.`);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Failed to end day.');
+    } finally {
+      setIsEndingDay(false);
+    }
+  };
+
+  const handleViewPrevious = async () => {
+    setShowPrevious((current) => !current);
+    if (showPrevious) return;
+
+    setLoadingPrevious(true);
+    setLoadError(null);
+    try {
+      const records = await queueService.getDailyExports();
+      setPreviousExports(records);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Failed to load previous stats.');
+    } finally {
+      setLoadingPrevious(false);
+    }
+  };
+
   const totalWaiting = Object.values(stats).reduce((acc, stat) => acc + stat.waiting, 0);
   const totalCompleted = Object.values(stats).reduce((acc, stat) => acc + stat.completed, 0);
   const totalActiveDepartments = departments.filter((d) => d.isActive).length;
@@ -291,6 +332,62 @@ function AdminDashboardInner({ onLogout }: { onLogout: () => void }) {
               </button>
             ))}
           </div>
+
+          <div className="card p-4 flex items-center justify-between gap-3">
+            <div>
+              <h3>End of Day</h3>
+              <p className="text-sm">Export today's queue records to CSV, then clear all queues.</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={() => void handleViewPrevious()} className="btn-ghost">
+                {showPrevious ? 'Hide Previous' : 'View Previous'}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleEndDay()}
+                disabled={isEndingDay}
+                className="btn-outline"
+              >
+                <Download size={14} /> {isEndingDay ? 'Ending Day…' : 'End Day'}
+              </button>
+            </div>
+          </div>
+
+          {endDayMessage && <div className="alert alert-success"><CheckCircle size={15} />{endDayMessage}</div>}
+
+          {showPrevious && (
+            <div className="card p-0 overflow-hidden">
+              <div className="px-6 py-4 border-b border-border">
+                <h3>Previous Days</h3>
+                <p className="text-sm">Historical end-of-day stats from database archives.</p>
+              </div>
+              {loadingPrevious ? (
+                <div className="px-6 py-6 text-sm text-muted-foreground">Loading previous stats…</div>
+              ) : previousExports.length === 0 ? (
+                <div className="px-6 py-6 text-sm text-muted-foreground">No archived days found yet.</div>
+              ) : (
+                <div className="divide-y divide-border">
+                  {previousExports.map((record) => (
+                    <div key={record.id} className="px-6 py-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="font-semibold text-foreground">{record.export_date}</p>
+                        <span className="badge badge-primary">{record.row_count} rows</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground mb-3">Exported at {new Date(record.exported_at).toLocaleString()}</p>
+                      <div className="grid grid-cols-2 md:grid-cols-6 gap-2 text-xs">
+                        <div className="bg-surface-muted border border-border rounded-md p-2">Waiting: {record.summary?.waiting ?? 0}</div>
+                        <div className="bg-surface-muted border border-border rounded-md p-2">Urgent: {record.summary?.urgent ?? 0}</div>
+                        <div className="bg-surface-muted border border-border rounded-md p-2">Called: {record.summary?.called ?? 0}</div>
+                        <div className="bg-surface-muted border border-border rounded-md p-2">Consulting: {record.summary?.inConsultation ?? 0}</div>
+                        <div className="bg-surface-muted border border-border rounded-md p-2">Completed: {record.summary?.completed ?? 0}</div>
+                        <div className="bg-surface-muted border border-border rounded-md p-2">No-show: {record.summary?.noShow ?? 0}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {loadError && <div className="alert alert-error"><AlertTriangle size={15} />{loadError}</div>}
 

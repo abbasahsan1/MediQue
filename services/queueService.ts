@@ -36,6 +36,58 @@ interface DepartmentRow {
   is_active: boolean;
 }
 
+interface ExportVisitRow {
+  id: string;
+  patient_name: string;
+  age: number;
+  gender: string | null;
+  problem_description: string | null;
+  symptoms: string[] | null;
+  severity: number;
+  department_id: string;
+  assigned_doctor_id: string | null;
+  status: string;
+  token_number: number;
+  prescription_text: string | null;
+  called_at: string | null;
+  consultation_started_at: string | null;
+  completed_at: string | null;
+  no_show_at: string | null;
+  created_at: string;
+  updated_at: string;
+  doctors?: { name?: string | null } | null;
+  departments?: { name?: string | null; code?: string | null } | null;
+}
+
+export interface DailyExportRecord {
+  id: string;
+  export_date: string;
+  exported_at: string;
+  row_count: number;
+  summary: {
+    waiting: number;
+    urgent: number;
+    called: number;
+    inConsultation: number;
+    completed: number;
+    noShow: number;
+  };
+  csv_content: string;
+}
+
+export interface LandingStats {
+  patientsHandled: number;
+  completedToday: number;
+  avgWaitMinutes: number;
+  urgentToday: number;
+}
+
+function escapeCsv(value: unknown): string {
+  if (value === null || value === undefined) return '""';
+  const text = String(value).replace(/"/g, '""');
+  return `"${text}"`;
+}
+
 function isUrgentText(text: string): boolean {
   const lower = text.toLowerCase();
   return URGENT_KEYWORDS.some((kw) => lower.includes(kw));
@@ -441,6 +493,192 @@ class QueueService {
     localStorage.removeItem(STORAGE_PATIENT_ID);
     this.patientsById.clear();
     this.queueByDepartment.clear();
+  }
+
+  async endDayAndExportCsv(): Promise<number> {
+    const dayStart = new Date();
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(dayStart);
+    dayEnd.setDate(dayEnd.getDate() + 1);
+
+    const { data, error } = await supabase
+      .from('visits')
+      .select('id, patient_name, age, gender, problem_description, symptoms, severity, department_id, assigned_doctor_id, status, token_number, prescription_text, called_at, consultation_started_at, completed_at, no_show_at, created_at, updated_at, doctors(name), departments(name, code)')
+      .gte('created_at', dayStart.toISOString())
+      .lt('created_at', dayEnd.toISOString())
+      .order('created_at', { ascending: true });
+
+    if (error) throw new Error(error.message);
+
+    const rows = (data ?? []) as ExportVisitRow[];
+    const headers = [
+      'id',
+      'patient_name',
+      'age',
+      'gender',
+      'problem_description',
+      'symptoms',
+      'severity',
+      'department_id',
+      'department_name',
+      'department_code',
+      'assigned_doctor_id',
+      'assigned_doctor_name',
+      'status',
+      'token_number',
+      'prescription_text',
+      'called_at',
+      'consultation_started_at',
+      'completed_at',
+      'no_show_at',
+      'created_at',
+      'updated_at',
+    ];
+
+    const csvLines = [headers.map((header) => escapeCsv(header)).join(',')];
+    rows.forEach((row) => {
+      const values = [
+        row.id,
+        row.patient_name,
+        row.age,
+        row.gender ?? '',
+        row.problem_description ?? '',
+        Array.isArray(row.symptoms) ? row.symptoms.join('; ') : '',
+        row.severity,
+        row.department_id,
+        row.departments?.name ?? '',
+        row.departments?.code ?? '',
+        row.assigned_doctor_id ?? '',
+        row.doctors?.name ?? '',
+        row.status,
+        row.token_number,
+        row.prescription_text ?? '',
+        row.called_at ?? '',
+        row.consultation_started_at ?? '',
+        row.completed_at ?? '',
+        row.no_show_at ?? '',
+        row.created_at,
+        row.updated_at,
+      ];
+      csvLines.push(values.map((value) => escapeCsv(value)).join(','));
+    });
+
+    const summary = rows.reduce((acc, row) => {
+      const status = row.status;
+      if (status === 'WAITING') acc.waiting += 1;
+      if (status === 'URGENT') acc.urgent += 1;
+      if (status === 'CALLED') acc.called += 1;
+      if (status === 'IN_CONSULTATION') acc.inConsultation += 1;
+      if (status === 'COMPLETED') acc.completed += 1;
+      if (status === 'NO_SHOW') acc.noShow += 1;
+      return acc;
+    }, {
+      waiting: 0,
+      urgent: 0,
+      called: 0,
+      inConsultation: 0,
+      completed: 0,
+      noShow: 0,
+    });
+
+    const csv = csvLines.join('\n');
+
+    const archiveInsert = await supabase
+      .from('daily_queue_exports')
+      .insert({
+        export_date: dayStart.toISOString().slice(0, 10),
+        exported_at: new Date().toISOString(),
+        row_count: rows.length,
+        summary,
+        csv_content: csv,
+      });
+
+    if (archiveInsert.error) throw new Error(archiveInsert.error.message);
+
+    if (typeof window !== 'undefined') {
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const datePart = dayStart.toISOString().slice(0, 10);
+      link.href = url;
+      link.download = `medique-end-of-day-${datePart}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    }
+
+    const clearResult = await supabase.rpc('clear_patient_queues');
+    if (clearResult.error) throw new Error(clearResult.error.message);
+
+    localStorage.removeItem(STORAGE_PATIENT_ID);
+    this.patientsById.clear();
+    this.queueByDepartment.clear();
+    return rows.length;
+  }
+
+  async getDailyExports(): Promise<DailyExportRecord[]> {
+    const { data, error } = await supabase
+      .from('daily_queue_exports')
+      .select('id, export_date, exported_at, row_count, summary, csv_content')
+      .order('export_date', { ascending: false })
+      .order('exported_at', { ascending: false });
+
+    if (error) throw new Error(error.message);
+    return (data ?? []) as DailyExportRecord[];
+  }
+
+  async getLandingStats(): Promise<LandingStats> {
+    const dayStart = new Date();
+    dayStart.setHours(0, 0, 0, 0);
+
+    const [exportsResult, visitsResult] = await Promise.all([
+      supabase
+        .from('daily_queue_exports')
+        .select('row_count, summary'),
+      supabase
+        .from('visits')
+        .select('status, severity, created_at, completed_at')
+        .gte('created_at', dayStart.toISOString()),
+    ]);
+
+    if (exportsResult.error) throw new Error(exportsResult.error.message);
+    if (visitsResult.error) throw new Error(visitsResult.error.message);
+
+    const exportRows = (exportsResult.data ?? []) as Array<{ row_count: number; summary: Record<string, number> | null }>;
+    const visits = (visitsResult.data ?? []) as Array<{
+      status: string;
+      severity: number | null;
+      created_at: string;
+      completed_at: string | null;
+    }>;
+
+    const historicalCompleted = exportRows.reduce((sum, row) => {
+      const completed = row.summary?.completed;
+      if (typeof completed === 'number') return sum + completed;
+      return sum + (row.row_count ?? 0);
+    }, 0);
+
+    const completedTodayVisits = visits.filter((visit) => visit.status === 'COMPLETED');
+    const completedToday = completedTodayVisits.length;
+    const urgentToday = visits.filter((visit) => (visit.severity ?? 0) > 0 || visit.status === 'URGENT').length;
+
+    const avgWaitMinutes = completedTodayVisits.length > 0
+      ? Math.round(
+        completedTodayVisits.reduce((sum, visit) => {
+          const end = visit.completed_at ? new Date(visit.completed_at).getTime() : new Date(visit.created_at).getTime();
+          const start = new Date(visit.created_at).getTime();
+          return sum + Math.max(0, (end - start) / 60000);
+        }, 0) / completedTodayVisits.length,
+      )
+      : 0;
+
+    return {
+      patientsHandled: historicalCompleted + completedToday,
+      completedToday,
+      avgWaitMinutes,
+      urgentToday,
+    };
   }
 
   /* ── Doctor auth ─────────────────────────────────── */
