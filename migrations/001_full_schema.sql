@@ -331,18 +331,7 @@ security definer
 set search_path = public
 as $$
 begin
-  truncate public.visits cascade;
-end;
-$$;
-
-create or replace function public.clear_patient_queues()
-returns void
-language plpgsql
-security definer
-set search_path = public
-as $$
-begin
-  truncate public.visits cascade;
+  truncate public.visits;
 end;
 $$;
 
@@ -448,7 +437,6 @@ grant execute on function public.create_visit(text, text, int, jsonb, uuid, uuid
 grant execute on function public.claim_next_visit(text, text) to anon, authenticated;
 grant execute on function public.transition_visit(uuid, text, text, text, int) to anon, authenticated;
 grant execute on function public.admin_reset() to anon, authenticated;
-grant execute on function public.clear_patient_queues() to anon, authenticated;
 
 -- 14. Notify PostgREST to reload schema cache
 notify pgrst, 'reload schema';

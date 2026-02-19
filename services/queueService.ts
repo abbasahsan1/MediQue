@@ -608,12 +608,7 @@ class QueueService {
       URL.revokeObjectURL(url);
     }
 
-    const clearResult = await supabase.rpc('clear_patient_queues');
-    if (clearResult.error) throw new Error(clearResult.error.message);
-
-    localStorage.removeItem(STORAGE_PATIENT_ID);
-    this.patientsById.clear();
-    this.queueByDepartment.clear();
+    await this.clearData();
     return rows.length;
   }
 
