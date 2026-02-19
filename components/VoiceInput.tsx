@@ -23,20 +23,60 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
-  // Track the last transcript we synced so we only push genuinely new transcripts
+  const sessionBaseRef = useRef(value);
+  const hasAutoStartedRef = useRef(false);
   const lastSyncedRef = useRef('');
+  const lastVoiceOutputRef = useRef('');
+
+  const combineText = (base: string, next: string) => {
+    if (!base) return next;
+    if (!next) return base;
+    return `${base.trim()} ${next.trim()}`;
+  };
 
   useEffect(() => {
-    if (transcript && transcript !== lastSyncedRef.current) {
-      lastSyncedRef.current = transcript;
-      onChangeRef.current(transcript);
-    }
+    if (!transcript || transcript === lastSyncedRef.current) return;
+
+    lastSyncedRef.current = transcript;
+    const merged = combineText(sessionBaseRef.current, transcript);
+    lastVoiceOutputRef.current = merged;
+    onChangeRef.current(merged);
   }, [transcript]);
+
+  useEffect(() => {
+    if (!isSupported || isListening || hasAutoStartedRef.current) return;
+    hasAutoStartedRef.current = true;
+    sessionBaseRef.current = value;
+    lastSyncedRef.current = '';
+    resetTranscript();
+    startListening();
+  }, [isListening, isSupported, resetTranscript, startListening, value]);
+
+  useEffect(() => {
+    if (!isListening) return;
+    if (value === lastVoiceOutputRef.current) return;
+
+    sessionBaseRef.current = value;
+    lastSyncedRef.current = '';
+    resetTranscript();
+  }, [isListening, resetTranscript, value]);
+
+  const handleInputChange = (nextValue: string) => {
+    sessionBaseRef.current = nextValue;
+    lastVoiceOutputRef.current = nextValue;
+    onChangeRef.current(nextValue);
+
+    if (isListening) {
+      lastSyncedRef.current = '';
+      resetTranscript();
+    }
+  };
 
   const handleToggle = () => {
     if (isListening) {
       stopListening();
     } else {
+      sessionBaseRef.current = value;
       lastSyncedRef.current = '';
       resetTranscript();
       startListening();
@@ -50,7 +90,7 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({
       {multiline ? (
         <textarea
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => handleInputChange(e.target.value)}
           placeholder={placeholder}
           className={inputClasses}
           style={{ minHeight: 88 }}
@@ -59,7 +99,7 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({
         <input
           type={inputType}
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => handleInputChange(e.target.value)}
           placeholder={placeholder}
           className={inputClasses}
           {...(inputType === 'number' ? { min: 0, max: 120 } : {})}
@@ -88,15 +128,21 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({
       )}
 
       {isListening && (
-        <div className="flex items-center gap-2 mt-2">
-          <div className="voice-bars">
-            <div className="voice-bar" />
-            <div className="voice-bar" />
-            <div className="voice-bar" />
-            <div className="voice-bar" />
-            <div className="voice-bar" />
+        <div className="mt-3 rounded-lg border border-primary/35 bg-primary/10 p-4">
+          <div className="flex items-center justify-center mb-3">
+            <div className="relative h-14 w-14 rounded-full bg-primary text-primary-foreground flex items-center justify-center">
+              <div className="absolute inset-0 rounded-full bg-primary/20 animate-ping" />
+              <Mic size={24} className="relative z-10" />
+            </div>
           </div>
-          <span className="text-xs text-primary">Listening... speak now</span>
+          <div className="voice-bars justify-center h-8 mb-1">
+            <div className="voice-bar !w-1 !h-5" />
+            <div className="voice-bar !w-1 !h-5" />
+            <div className="voice-bar !w-1 !h-5" />
+            <div className="voice-bar !w-1 !h-5" />
+            <div className="voice-bar !w-1 !h-5" />
+          </div>
+          <p className="text-xs text-primary text-center font-semibold">Listening... speak now</p>
         </div>
       )}
     </div>

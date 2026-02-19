@@ -7,7 +7,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
-    "test": "node --test --import tsx"
+    "test": "JWT_SECRET=test_jwt_secret_12345678901234567890 CHECKIN_SECRET=test_checkin_secret_12345678901234567890 node --test --import tsx src/**/*.test.ts"
   },
   "dependencies": {
     "cors": "^2.8.5",

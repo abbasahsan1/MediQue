@@ -51,6 +51,7 @@ function App() {
       <Route path="/" element={<Suspense fallback={<LazyFallback />}><LandingPage /></Suspense>} />
       <Route path="/doctor/login" element={<Suspense fallback={<LazyFallback />}><DoctorLogin /></Suspense>} />
       <Route path="/doctor/dashboard" element={<Suspense fallback={<LazyFallback />}><DoctorDashboard /></Suspense>} />
+      <Route path="/doctor/:doctorId/newpatient" element={<Suspense fallback={<LazyFallback />}><PatientIntake /></Suspense>} />
       <Route path="/admin" element={<Suspense fallback={<LazyFallback />}><AdminDashboard /></Suspense>} />
       <Route path="/:deptId/newpatient" element={<Suspense fallback={<LazyFallback />}><PatientIntake /></Suspense>} />
       <Route path="/patient/:patientId" element={<Suspense fallback={<LazyFallback />}><PatientView /></Suspense>} />

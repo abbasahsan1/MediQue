@@ -143,7 +143,7 @@ function AdminDashboardInner({ onLogout }: { onLogout: () => void }) {
 
   // Load doctors when tab is active
   useEffect(() => {
-    if (activeTab !== 'doctors') return;
+    if (activeTab !== 'doctors' && activeTab !== 'qr') return;
     const loadDoctors = async () => {
       try {
         const list = await queueService.listDoctors();
@@ -438,6 +438,10 @@ function AdminDashboardInner({ onLogout }: { onLogout: () => void }) {
                   VITE_BASE_URL is not configured. QR codes will use the current origin as fallback.
                 </div>
               )}
+              <div className="card p-5">
+                <h3 className="mb-1">Department QR Codes</h3>
+                <p className="text-sm">Patients join the department pool queue.</p>
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                 {qrDepartments.map((dept) => {
                   const origin = BASE_URL ?? window.location.origin;
@@ -458,6 +462,38 @@ function AdminDashboardInner({ onLogout }: { onLogout: () => void }) {
                   );
                 })}
               </div>
+
+              <div className="card p-5">
+                <h3 className="mb-1">Doctor QR Codes</h3>
+                <p className="text-sm">Patients are assigned directly to the selected doctor.</p>
+              </div>
+              {doctors.length === 0 ? (
+                <div className="card p-6 text-sm text-muted-foreground">No doctor accounts found. Create doctors first to generate doctor-specific QR codes.</div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                  {doctors.map((doctor) => {
+                    const origin = BASE_URL ?? window.location.origin;
+                    const checkinUrl = `${origin}/doctor/${doctor.id}/newpatient`;
+                    const doctorDept = qrDepartments.find((department) => department.id === doctor.department_id);
+
+                    return (
+                      <div key={doctor.id} className="card p-6 flex flex-col items-center text-center">
+                        <div className={`w-full h-1 rounded-full ${doctorDept?.color ?? 'bg-dept-general'} mb-5`} />
+                        <h3 className="text-base font-bold text-foreground mb-1">Dr. {doctor.name}</h3>
+                        <p className="text-xs mb-1">{doctor.department_name}</p>
+                        <p className="text-xs mb-5">Scan to assign directly</p>
+                        <div className="bg-white p-4 rounded-lg mb-4">
+                          <QRCodeSVG value={checkinUrl} size={160} level="M" />
+                        </div>
+                        <p className="text-xs text-muted-foreground mb-3 break-all max-w-[220px]">{checkinUrl}</p>
+                        <button type="button" onClick={() => window.print()} className="btn-outline btn-sm text-sm">
+                          Print Poster
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 

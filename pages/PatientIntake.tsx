@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { DepartmentConfig, Gender } from '../types';
 import { DEPARTMENTS } from '../constants';
-import { queueService } from '../services/queueService';
+import { DoctorRecord, queueService } from '../services/queueService';
 import { VoiceInput } from '../components/VoiceInput';
 import {
   Activity,
@@ -34,7 +34,7 @@ interface FormData {
 }
 
 export const PatientIntake: React.FC = () => {
-  const { deptId } = useParams<{ deptId: string }>();
+  const { deptId, doctorId } = useParams<{ deptId?: string; doctorId?: string }>();
   const navigate = useNavigate();
 
   const [step, setStep] = useState<Step>('name');
@@ -46,9 +46,12 @@ export const PatientIntake: React.FC = () => {
     problemDescription: '',
   });
   const [departments, setDepartments] = useState<DepartmentConfig[]>(Object.values(DEPARTMENTS));
-  // If deptId is supplied via URL (QR code), skip the department step.
-  const hasDeptFromUrl = Boolean(deptId);
-  const STEP_ORDER: Step[] = hasDeptFromUrl
+  const [selectedDoctor, setSelectedDoctor] = useState<DoctorRecord | null>(null);
+  const [doctorLoading, setDoctorLoading] = useState(Boolean(doctorId));
+  const [doctorError, setDoctorError] = useState<string | null>(null);
+
+  const hasFixedDepartment = Boolean(deptId) || Boolean(selectedDoctor?.department_id);
+  const STEP_ORDER: Step[] = hasFixedDepartment
     ? ['name', 'age', 'gender', 'problem', 'review']
     : ['name', 'age', 'gender', 'department', 'problem', 'review'];
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -56,11 +59,46 @@ export const PatientIntake: React.FC = () => {
   const [editingField, setEditingField] = useState<Step | null>(null);
   const [restoring, setRestoring] = useState(true);
 
+  useEffect(() => {
+    if (!doctorId) {
+      setDoctorLoading(false);
+      setDoctorError(null);
+      setSelectedDoctor(null);
+      return;
+    }
+
+    const loadDoctor = async () => {
+      setDoctorLoading(true);
+      setDoctorError(null);
+      try {
+        const doctor = await queueService.getDoctorById(doctorId);
+        if (!doctor) {
+          setDoctorError('Doctor QR is invalid or no longer available.');
+          return;
+        }
+        setSelectedDoctor(doctor);
+        setFormData((prev) => ({ ...prev, department: doctor.department_id }));
+      } catch (err) {
+        setDoctorError(err instanceof Error ? err.message : 'Failed to load doctor details.');
+      } finally {
+        setDoctorLoading(false);
+      }
+    };
+
+    void loadDoctor();
+  }, [doctorId]);
+
   // Ghost account: Check if patient already has an active visit
   useEffect(() => {
+    if (doctorLoading) return;
+
     const checkExistingVisit = async () => {
       try {
-        const existing = await queueService.findActiveVisitForGuest(deptId?.toUpperCase());
+        const resolvedDepartment = selectedDoctor?.department_id ?? deptId?.toUpperCase();
+        const existing = await queueService.findActiveVisitForGuest(
+          resolvedDepartment,
+          selectedDoctor?.id,
+        );
         if (existing) {
           navigate(`/patient/${existing.id}`, { replace: true });
           return;
@@ -71,7 +109,7 @@ export const PatientIntake: React.FC = () => {
       setRestoring(false);
     };
     void checkExistingVisit();
-  }, [deptId, navigate]);
+  }, [deptId, doctorLoading, navigate, selectedDoctor?.department_id, selectedDoctor?.id]);
 
   // Ensure guest UUID exists
   useEffect(() => {
@@ -103,7 +141,7 @@ export const PatientIntake: React.FC = () => {
     }
   }, [step, formData]);
 
-  const goNext = () => {
+  const goNext = useCallback(() => {
     if (!canProceed()) return;
     if (editingField) {
       setEditingField(null);
@@ -112,7 +150,7 @@ export const PatientIntake: React.FC = () => {
     }
     const next = STEP_ORDER[stepIndex + 1];
     if (next) setStep(next);
-  };
+  }, [STEP_ORDER, canProceed, editingField, stepIndex]);
 
   const goBack = () => {
     if (editingField) {
@@ -139,6 +177,7 @@ export const PatientIntake: React.FC = () => {
         formData.department,
         formData.problemDescription.trim(),
         formData.gender as Gender,
+        selectedDoctor?.id,
       );
       navigate(`/patient/${patient.id}`, { replace: true });
     } catch (err) {
@@ -151,7 +190,19 @@ export const PatientIntake: React.FC = () => {
     ?? DEPARTMENTS[formData.department]
     ?? null;
 
-  if (restoring) {
+  useEffect(() => {
+    if (editingField) return;
+    if (step !== 'name' && step !== 'age' && step !== 'problem') return;
+    if (!canProceed()) return;
+
+    const timer = window.setTimeout(() => {
+      goNext();
+    }, 900);
+
+    return () => window.clearTimeout(timer);
+  }, [canProceed, editingField, formData.age, formData.name, formData.problemDescription, goNext, step]);
+
+  if (restoring || doctorLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <Loader className="animate-spin text-muted-foreground" size={24} />
@@ -170,6 +221,9 @@ export const PatientIntake: React.FC = () => {
         </div>
         {deptConfig && (
           <span className="badge badge-primary text-xs">{deptConfig.name}</span>
+        )}
+        {selectedDoctor && (
+          <span className="badge badge-success text-xs">Dr. {selectedDoctor.name}</span>
         )}
       </header>
 
@@ -192,6 +246,13 @@ export const PatientIntake: React.FC = () => {
           <h2 className="text-xl font-bold text-foreground">
             {editingField ? `Edit: ${STEP_LABELS[editingField]}` : STEP_LABELS[step]}
           </h2>
+
+          {(doctorError || submitError) && step !== 'review' && (
+            <div className="alert alert-error">
+              <AlertTriangle size={16} />
+              <span>{doctorError ?? submitError}</span>
+            </div>
+          )}
 
           {/* Name step */}
           {step === 'name' && (
@@ -289,7 +350,7 @@ export const PatientIntake: React.FC = () => {
               <ReviewRow label="Name" value={formData.name} onEdit={() => startEdit('name')} />
               <ReviewRow label="Age" value={`${formData.age} years`} onEdit={() => startEdit('age')} />
               <ReviewRow label="Gender" value={formData.gender} onEdit={() => startEdit('gender')} />
-              {hasDeptFromUrl ? (
+              {hasFixedDepartment ? (
                 <div className="bg-surface border border-border rounded-lg p-4">
                   <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-1">Department</p>
                   <p className="text-sm font-medium text-foreground">{deptConfig?.name ?? formData.department}</p>
@@ -297,12 +358,18 @@ export const PatientIntake: React.FC = () => {
               ) : (
                 <ReviewRow label="Department" value={deptConfig?.name ?? formData.department} onEdit={() => startEdit('department')} />
               )}
+              {selectedDoctor && (
+                <div className="bg-surface border border-border rounded-lg p-4">
+                  <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-1">Assigned Doctor</p>
+                  <p className="text-sm font-medium text-foreground">{selectedDoctor.name}</p>
+                </div>
+              )}
               <ReviewRow label="Problem" value={formData.problemDescription} onEdit={() => startEdit('problem')} />
 
               <button
                 type="button"
                 onClick={() => void handleSubmit()}
-                disabled={isSubmitting}
+                disabled={isSubmitting || Boolean(doctorError)}
                 className="btn-primary w-full justify-center py-4 text-base mt-4"
               >
                 {isSubmitting ? (
@@ -325,7 +392,7 @@ export const PatientIntake: React.FC = () => {
               <button
                 type="button"
                 onClick={goNext}
-                disabled={!canProceed()}
+                disabled={!canProceed() || Boolean(doctorError)}
                 className="btn-primary flex-1 justify-center"
               >
                 {editingField ? 'Save' : 'Next'} <ChevronRight size={14} />

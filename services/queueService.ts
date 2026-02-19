@@ -112,6 +112,7 @@ class QueueService {
     department: Department,
     problemDescription: string,
     gender?: Gender,
+    assignedDoctorId?: string,
   ): Promise<Patient> {
     const authId = await this.ensureSession();
     const guestUuid = this.getGuestUuid();
@@ -126,6 +127,7 @@ class QueueService {
       p_patient_auth_id: authId,
       p_gender: gender ?? null,
       p_problem_description: problemDescription,
+      p_assigned_doctor_id: assignedDoctorId ?? null,
     });
 
     let row = (rpc.data?.[0] ?? rpc.data) as VisitRow | null;
@@ -147,6 +149,7 @@ class QueueService {
           patient_auth_id: authId,
           gender: gender ?? null,
           problem_description: problemDescription,
+          assigned_doctor_id: assignedDoctorId ?? null,
         })
         .select('*, departments(code), doctors(name)')
         .single();
@@ -163,7 +166,7 @@ class QueueService {
   }
 
   /** Find an active visit for the current guest in a given department */
-  async findActiveVisitForGuest(departmentId?: string): Promise<Patient | undefined> {
+  async findActiveVisitForGuest(departmentId?: string, doctorId?: string): Promise<Patient | undefined> {
     const guestUuid = localStorage.getItem(STORAGE_GUEST_UUID);
     if (!guestUuid) return undefined;
 
@@ -177,6 +180,10 @@ class QueueService {
 
     if (departmentId) {
       query = query.eq('department_id', departmentId);
+    }
+
+    if (doctorId) {
+      query = query.eq('assigned_doctor_id', doctorId);
     }
 
     const { data, error } = await query.maybeSingle();
@@ -500,6 +507,11 @@ class QueueService {
     const { data, error } = await supabase.rpc('list_doctors');
     if (error) throw new Error(error.message);
     return (data ?? []) as DoctorRecord[];
+  }
+
+  async getDoctorById(doctorId: string): Promise<DoctorRecord | null> {
+    const doctors = await this.listDoctors();
+    return doctors.find((doctor) => doctor.id === doctorId) ?? null;
   }
 
   async deleteDoctor(doctorId: string): Promise<void> {

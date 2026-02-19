@@ -121,7 +121,8 @@ create or replace function public.create_visit(
   p_patient_auth_id uuid,
   p_location_token text default null,
   p_gender text default null,
-  p_problem_description text default null
+  p_problem_description text default null,
+  p_assigned_doctor_id uuid default null
 )
 returns setof public.visits
 language plpgsql
@@ -139,6 +140,17 @@ begin
 
   if not exists (select 1 from public.departments d where d.id = p_department_id and d.is_active = true) then
     raise exception 'Department is unavailable';
+  end if;
+
+  if p_assigned_doctor_id is not null then
+    if not exists (
+      select 1
+      from public.doctors d
+      where d.id = p_assigned_doctor_id
+        and d.department_id = p_department_id
+    ) then
+      raise exception 'Assigned doctor is invalid for this department';
+    end if;
   end if;
 
   v_severity := 0;
@@ -175,7 +187,8 @@ begin
     guest_uuid,
     patient_auth_id,
     gender,
-    problem_description
+    problem_description,
+    assigned_doctor_id
   )
   values (
     p_patient_name,
@@ -188,7 +201,8 @@ begin
     p_guest_uuid,
     p_patient_auth_id,
     p_gender,
-    p_problem_description
+    p_problem_description,
+    p_assigned_doctor_id
   )
   returning *;
 end;
@@ -420,7 +434,7 @@ set
 
 -- 13. Grant execute on functions to anon and authenticated roles
 grant execute on function public.generate_token(text) to anon, authenticated;
-grant execute on function public.create_visit(text, text, int, jsonb, uuid, uuid, text, text, text) to anon, authenticated;
+grant execute on function public.create_visit(text, text, int, jsonb, uuid, uuid, text, text, text, uuid) to anon, authenticated;
 grant execute on function public.claim_next_visit(text, text) to anon, authenticated;
 grant execute on function public.transition_visit(uuid, text, text, text, int) to anon, authenticated;
 grant execute on function public.admin_reset() to anon, authenticated;

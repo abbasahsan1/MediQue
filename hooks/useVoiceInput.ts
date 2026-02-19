@@ -189,6 +189,7 @@ export function useVoiceInput(): UseVoiceInputReturn {
   const finalizedRef = useRef('');
   const backendRef = useRef<'deepgram' | 'riva' | null>(null);
   const rivaSendRef = useRef<((pcm: ArrayBuffer) => void) | null>(null);
+  const isStoppingRef = useRef(false);
 
   const hasDeepgram = !!DEEPGRAM_KEY;
   const hasRiva = !!RIVA_WS_URL;
@@ -200,6 +201,8 @@ export function useVoiceInput(): UseVoiceInputReturn {
     (hasDeepgram || hasRiva);
 
   const cleanup = useCallback(() => {
+    isStoppingRef.current = true;
+
     if (commitTimerRef.current) {
       clearInterval(commitTimerRef.current);
       commitTimerRef.current = null;
@@ -263,6 +266,7 @@ export function useVoiceInput(): UseVoiceInputReturn {
 
     setError(null);
     finalizedRef.current = '';
+    isStoppingRef.current = false;
 
     try {
       // Get microphone access
@@ -286,6 +290,7 @@ export function useVoiceInput(): UseVoiceInputReturn {
 
       // Transcript handler — shared between Deepgram and Riva
       const handleTranscript = (text: string, isFinal: boolean) => {
+        setError(null);
         if (isFinal) {
           finalizedRef.current = finalizedRef.current
             ? `${finalizedRef.current} ${text}`
@@ -350,7 +355,7 @@ export function useVoiceInput(): UseVoiceInputReturn {
         wsRef.current = ws;
 
         ws.onclose = (event) => {
-          if (event.code !== 1000) {
+          if (!isStoppingRef.current && event.code !== 1000) {
             setError('Voice connection closed unexpectedly. Please type your response.');
           }
           setIsListening(false);
@@ -384,7 +389,7 @@ export function useVoiceInput(): UseVoiceInputReturn {
             clearInterval(commitTimerRef.current);
             commitTimerRef.current = null;
           }
-          if (event.code !== 1000) {
+          if (!isStoppingRef.current && event.code !== 1000) {
             setError('Voice connection closed unexpectedly. Please type your response.');
           }
           setIsListening(false);
