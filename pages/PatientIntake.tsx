@@ -192,7 +192,7 @@ export const PatientIntake: React.FC = () => {
 
   useEffect(() => {
     if (editingField) return;
-    if (step !== 'name' && step !== 'age' && step !== 'problem') return;
+    if (step !== 'name' && step !== 'age') return;
     if (!canProceed()) return;
 
     const timer = window.setTimeout(() => {
