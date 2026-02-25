@@ -24,6 +24,14 @@ export const PatientView: React.FC = () => {
   const [lastNotifiedPos, setLastNotifiedPos] = useState<number>(999);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
+  // Refs keep the latest mutable state accessible inside the subscription
+  // callback without causing the subscription to be torn down and re-created.
+  const patientRef = useRef<Patient | undefined>(undefined);
+  const lastNotifiedPosRef = useRef<number>(999);
+
+  useEffect(() => { patientRef.current = patient; }, [patient]);
+  useEffect(() => { lastNotifiedPosRef.current = lastNotifiedPos; }, [lastNotifiedPos]);
+
   useEffect(() => {
     audioRef.current = new Audio('https://actions.google.com/sounds/v1/alarms/beep_short.ogg');
     if ('Notification' in window && Notification.permission === 'default') {
@@ -37,7 +45,7 @@ export const PatientView: React.FC = () => {
     const updateData = async () => {
       const current = await queueService.fetchPatient(patientId);
 
-      if (current && current.status === PatientStatus.CALLED && patient?.status !== PatientStatus.CALLED) {
+      if (current && current.status === PatientStatus.CALLED && patientRef.current?.status !== PatientStatus.CALLED) {
         if ('Notification' in window && Notification.permission === 'granted') {
           new Notification("It's Your Turn!", {
             body: `Token ${current.tokenNumber} — Please proceed to the room.`,
@@ -59,7 +67,7 @@ export const PatientView: React.FC = () => {
         const nextPosition = waitingBefore + 1;
         setPosition(nextPosition);
 
-        if (nextPosition <= 3 && nextPosition > 0 && lastNotifiedPos > 3 && current.status === PatientStatus.WAITING) {
+        if (nextPosition <= 3 && nextPosition > 0 && lastNotifiedPosRef.current > 3 && current.status === PatientStatus.WAITING) {
           if ('Notification' in window && Notification.permission === 'granted') {
             new Notification('Almost There', {
               body: `You are #${nextPosition} in line. Please stay near the department.`,
@@ -68,8 +76,10 @@ export const PatientView: React.FC = () => {
           }
           audioRef.current?.play().catch(() => {});
           setLastNotifiedPos(nextPosition);
+          lastNotifiedPosRef.current = nextPosition;
         } else if (nextPosition > 3) {
           setLastNotifiedPos(nextPosition);
+          lastNotifiedPosRef.current = nextPosition;
         }
 
         const active = queue.find(
@@ -79,10 +89,14 @@ export const PatientView: React.FC = () => {
       }
     };
 
+    // Initialise the stream connection exactly once when patientId is available.
+    // All state changes (patient.status, position) are handled inside the
+    // callback via refs — they must NOT appear in the dependency array or the
+    // subscription would be torn down and re-created on every status update.
     void updateData();
     const unsub = queueService.subscribe(() => { void updateData(); });
     return () => unsub();
-  }, [patientId, patient?.status, lastNotifiedPos]);
+  }, [patientId]); // ← only patientId: stream is created once per patient session
 
   if (!patient) {
     return (

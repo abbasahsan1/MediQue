@@ -181,6 +181,119 @@ export class QueueUseCases {
     return next;
   }
 
+  /**
+   * Phase-1 of the two-phase QR check-in flow.
+   * Called immediately when the patient scans a QR code.
+   * Creates a visit in the SCANNED state so the stream connection
+   * is initialised exactly once before any patient data is collected.
+   */
+  async scanQr(input: {
+    departmentId: string;
+    restoreToken: string;
+    traceId: string;
+    idempotencyKey: string;
+  }): Promise<Visit> {
+    const scope = `scan:${input.departmentId}`;
+    const existing = await this.deps.idempotency.get(scope, input.idempotencyKey);
+    if (existing) {
+      return JSON.parse(existing) as Visit;
+    }
+
+    const createdAt = now();
+    const tokenNumber = await this.deps.visits.nextTokenNumber(input.departmentId, createdAt);
+
+    const visit: Visit = {
+      id: crypto.randomUUID(),
+      departmentId: input.departmentId,
+      tokenNumber,
+      patientName: '',
+      age: 0,
+      symptoms: [],
+      patientSessionId: crypto.randomUUID(),
+      restoreTokenHash: hash(input.restoreToken),
+      state: 'SCANNED',
+      priority: 'NORMAL',
+      version: 1,
+      createdAt,
+      updatedAt: createdAt,
+    };
+
+    await this.deps.visits.create(visit);
+    await this.deps.audits.append(
+      makeAudit(
+        { userId: 'patient', role: 'RECEPTION' },
+        input.traceId,
+        'VISIT_SCANNED',
+        'VISIT',
+        visit.id,
+        undefined,
+        { state: visit.state, tokenNumber: visit.tokenNumber },
+      ),
+    );
+
+    const snapshot = await queueSnapshot(this.deps.visits, input.departmentId);
+    await this.deps.publisher.publishQueueUpdated(snapshot);
+    await this.deps.idempotency.put(scope, input.idempotencyKey, JSON.stringify(visit));
+    return visit;
+  }
+
+  /**
+   * Phase-2 of the two-phase QR check-in flow.
+   * Called only after the patient has fully completed and validated the intake
+   * form on the client side. Transitions an existing SCANNED visit to
+   * WAITING (or URGENT when symptoms warrant it), ensuring the payload is
+   * sent to the server exclusively after client-side validation passes.
+   */
+  async activateVisit(input: {
+    visitId: string;
+    patientName: string;
+    age: number;
+    symptoms: string[];
+    traceId: string;
+  }): Promise<Visit> {
+    const visit = await this.deps.visits.getById(input.visitId);
+    if (!visit) {
+      throw new VisitNotFoundError(input.visitId);
+    }
+
+    // Determine target state based on triage before asserting the transition,
+    // so the correct error is raised when the current state is invalid.
+    const priority = classifyPriority(input.symptoms, this.deps.triageConfig);
+    const targetState: VisitState = priority === 'URGENT' ? 'URGENT' : 'WAITING';
+
+    // Validates that the current state allows the transition (SCANNED only).
+    assertTransition(visit.state, targetState);
+
+    const current = now();
+    const next: Visit = {
+      ...visit,
+      patientName: input.patientName,
+      age: input.age,
+      symptoms: input.symptoms,
+      state: targetState,
+      priority,
+      version: visit.version + 1,
+      updatedAt: current,
+    };
+
+    await this.deps.visits.update(next, visit.version);
+    await this.deps.audits.append(
+      makeAudit(
+        { userId: 'patient', role: 'RECEPTION' },
+        input.traceId,
+        'VISIT_ACTIVATED',
+        'VISIT',
+        next.id,
+        { state: visit.state } as unknown as Record<string, unknown>,
+        { state: next.state, patientName: next.patientName, priority: next.priority } as unknown as Record<string, unknown>,
+      ),
+    );
+
+    const snapshot = await queueSnapshot(this.deps.visits, next.departmentId);
+    await this.deps.publisher.publishQueueUpdated(snapshot);
+    return next;
+  }
+
   async getVisit(visitId: string): Promise<Visit | undefined> {
     return this.deps.visits.getById(visitId);
   }

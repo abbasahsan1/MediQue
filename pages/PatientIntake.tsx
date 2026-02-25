@@ -168,12 +168,36 @@ export const PatientIntake: React.FC = () => {
   };
 
   const handleSubmit = async () => {
+    // Explicit pre-submission validation: payload is only transmitted to the
+    // server after all fields have been thoroughly validated on the client.
+    if (!formData.name.trim() || formData.name.trim().length < 2) {
+      setSubmitError('Please enter a valid full name (minimum 2 characters).');
+      return;
+    }
+    const ageNum = Number(formData.age);
+    if (!formData.age || !Number.isInteger(ageNum) || ageNum < 0 || ageNum > 120) {
+      setSubmitError('Please enter a valid age between 0 and 120.');
+      return;
+    }
+    if (!formData.gender) {
+      setSubmitError('Please select a gender.');
+      return;
+    }
+    if (!formData.department) {
+      setSubmitError('Please select a department.');
+      return;
+    }
+    if (!formData.problemDescription.trim() || formData.problemDescription.trim().length < 3) {
+      setSubmitError('Please describe your problem (minimum 3 characters).');
+      return;
+    }
+
     setSubmitError(null);
     setIsSubmitting(true);
     try {
       const patient = await queueService.checkIn(
         formData.name.trim(),
-        Number(formData.age),
+        ageNum,
         formData.department,
         formData.problemDescription.trim(),
         formData.gender as Gender,
