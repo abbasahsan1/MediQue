@@ -43,6 +43,22 @@ const checkInSchema = z.object({
   idempotencyKey: z.string().min(8).max(120),
 });
 
+/** Phase-1: patient scans QR code — creates a SCANNED visit */
+const qrScanSchema = z.object({
+  departmentId: z.string().min(2),
+  signedCheckinToken: z.string().min(20),
+  restoreToken: z.string().min(8),
+  idempotencyKey: z.string().min(8).max(120),
+});
+
+/** Phase-2: patient submits validated intake form — transitions SCANNED → WAITING/URGENT */
+const activateSchema = z.object({
+  visitId: z.string().uuid(),
+  patientName: z.string().min(2).max(120),
+  age: z.number().int().min(0).max(120),
+  symptoms: z.array(z.string().min(1)).max(20),
+});
+
 const transitionSchema = z.object({
   expectedVersion: z.number().int().positive(),
   prescriptionText: z.string().max(10_000).optional(),
@@ -108,6 +124,79 @@ export const createHttpApp = (
       return;
     }
     res.json(visit);
+  });
+
+  /**
+   * Phase-1 endpoint: called immediately when a patient scans a QR code.
+   * Validates the signed check-in token and creates a visit in SCANNED state.
+   * The stream connection for this visit is established at this point —
+   * exactly once — before any patient data is collected on the client.
+   */
+  app.post('/api/v1/patient/qr-scan', async (req: Request, res) => {
+    const parsed = qrScanSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid payload', details: parsed.error.flatten() });
+      return;
+    }
+
+    const payload = parsed.data;
+    const department = DEPARTMENT_REGISTRY.find((record) => record.id === payload.departmentId);
+    if (!department || !department.isActive) {
+      res.status(409).json({ error: 'Department unavailable for check-in' });
+      return;
+    }
+    const validToken = verifyCheckinToken(payload.signedCheckinToken, payload.departmentId);
+    if (!validToken) {
+      res.status(401).json({ error: 'Invalid or expired check-in token' });
+      return;
+    }
+
+    try {
+      const visit = await useCases.scanQr({
+        departmentId: payload.departmentId,
+        restoreToken: payload.restoreToken,
+        idempotencyKey: payload.idempotencyKey,
+        traceId: req.traceId ?? crypto.randomUUID(),
+      });
+      res.status(201).json(visit);
+    } catch (error) {
+      res.status(409).json({ error: error instanceof Error ? error.message : 'QR scan failed' });
+    }
+  });
+
+  /**
+   * Phase-2 endpoint: called exclusively after the patient has fully completed
+   * and validated the intake form on the client side.
+   * Transitions the existing SCANNED visit to WAITING (or URGENT) so the
+   * payload is only committed server-side once client validation passes.
+   */
+  app.post('/api/v1/patient/activate', async (req: Request, res) => {
+    const parsed = activateSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid payload', details: parsed.error.flatten() });
+      return;
+    }
+
+    try {
+      const visit = await useCases.activateVisit({
+        visitId: parsed.data.visitId,
+        patientName: parsed.data.patientName,
+        age: parsed.data.age,
+        symptoms: parsed.data.symptoms,
+        traceId: req.traceId ?? crypto.randomUUID(),
+      });
+      res.status(200).json(visit);
+    } catch (error) {
+      if (error instanceof VisitNotFoundError) {
+        res.status(404).json({ error: error.message });
+        return;
+      }
+      if (error instanceof InvalidTransitionError) {
+        res.status(422).json({ error: error.message });
+        return;
+      }
+      res.status(409).json({ error: error instanceof Error ? error.message : 'Activation failed' });
+    }
   });
 
   app.get('/api/v1/departments/:departmentId/queue', authMiddleware, requireRole(['ADMIN', 'DOCTOR', 'RECEPTION']), async (req, res) => {

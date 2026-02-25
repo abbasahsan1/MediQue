@@ -4,6 +4,7 @@ import { canTransition } from './stateMachine.js';
 
 test('allows valid transitions only', () => {
   assert.equal(canTransition('SCANNED', 'WAITING'), true);
+  assert.equal(canTransition('SCANNED', 'URGENT'), true);
   assert.equal(canTransition('WAITING', 'URGENT'), true);
   assert.equal(canTransition('WAITING', 'CALLED'), true);
   assert.equal(canTransition('URGENT', 'CALLED'), true);

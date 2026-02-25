@@ -2,7 +2,7 @@ import type { VisitState } from './models.js';
 import { InvalidTransitionError } from './errors.js';
 
 const ALLOWED: Record<VisitState, VisitState[]> = {
-  SCANNED: ['WAITING'],
+  SCANNED: ['WAITING', 'URGENT'],
   WAITING: ['URGENT', 'CALLED'],
   URGENT: ['CALLED'],
   CALLED: ['IN_CONSULTATION', 'NO_SHOW'],

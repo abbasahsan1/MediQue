@@ -97,6 +97,7 @@ class QueueService {
   private patientsById = new Map<string, Patient>();
   private queueByDepartment = new Map<string, Patient[]>();
   private channels = new Map<string, RealtimeChannel>();
+  private pollIntervals = new Map<string, ReturnType<typeof setInterval>>();
   private subscribers = new Map<string, Set<() => void>>();
   private departmentsCache: Array<DepartmentConfig & { isActive: boolean }> | null = null;
 
@@ -440,15 +441,20 @@ class QueueService {
     listeners.add(callback);
     this.subscribers.set(key, listeners);
 
-    // Polling fallback: ensures updates even if Realtime is not enabled
-    const pollInterval = setInterval(() => {
-      const fire = async () => {
-        if (department) await this.refreshDepartment(department).catch(() => undefined);
-        else await this.refreshAllDepartments().catch(() => undefined);
-        callback();
-      };
-      void fire();
-    }, 3000);
+    // Polling fallback: one interval per key, shared across all subscribers.
+    // Fires all registered callbacks so every subscriber receives the update.
+    if (!this.pollIntervals.has(key)) {
+      const pollInterval = setInterval(() => {
+        const fire = async () => {
+          if (department) await this.refreshDepartment(department).catch(() => undefined);
+          else await this.refreshAllDepartments().catch(() => undefined);
+          const callbacks = this.subscribers.get(key);
+          callbacks?.forEach((listener) => listener());
+        };
+        void fire();
+      }, 3000);
+      this.pollIntervals.set(key, pollInterval);
+    }
 
     if (!this.channels.has(key)) {
       const channel = supabase
@@ -473,12 +479,16 @@ class QueueService {
     }
 
     return () => {
-      clearInterval(pollInterval);
       const callbacks = this.subscribers.get(key);
       if (!callbacks) return;
       callbacks.delete(callback);
       if (callbacks.size === 0) {
         this.subscribers.delete(key);
+        const pollInterval = this.pollIntervals.get(key);
+        if (pollInterval) {
+          clearInterval(pollInterval);
+          this.pollIntervals.delete(key);
+        }
         const channel = this.channels.get(key);
         if (channel) {
           void supabase.removeChannel(channel);
